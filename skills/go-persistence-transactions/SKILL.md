@@ -5,7 +5,7 @@ description: Implement Go persistence, repositories, migrations, transaction bou
 
 # Go Persistence And Transactions
 
-Use this skill to keep database code explicit and transaction boundaries aligned with business consistency. Read local migration and adapter-test rules first; many Go repos enforce database behavior with custom lints.
+Use this when a Go change touches repositories, transactions, migrations, database adapters, idempotency, locking, or outbox publishing. Read local migration and adapter-test rules first.
 
 ## Persistence Principles
 
@@ -13,7 +13,7 @@ Use this skill to keep database code explicit and transaction boundaries aligned
 - Keep domain types independent of database tags and ORM lifecycle hooks unless the project intentionally uses active record.
 - Keep repository interfaces narrow and owned by the consuming package or aggregate domain.
 - Use migrations according to the repo's documented source of truth.
-- Treat idempotency, tenant isolation, and concurrency as design requirements.
+- Decide idempotency, tenant isolation, and concurrency behavior before writing adapter code.
 - Keep database transaction objects out of domain and transport signatures.
 
 ## Repository Design
@@ -38,11 +38,11 @@ type Repository[T any] interface {
 }
 ```
 
-Generic CRUD interfaces usually hide important business queries, locking, tenant isolation, authorization, and consistency requirements.
+Generic CRUD interfaces hide business queries, locking, tenant isolation, authorization, and consistency requirements.
 
 ## Transaction Boundaries
 
-A transaction should cover one application command that needs immediate consistency. A common shape is a transactor in the application layer:
+A transaction should cover one application command that needs immediate consistency. Use a transactor when the repo does not already have a unit-of-work convention:
 
 ```go
 type Transactor interface {
@@ -50,7 +50,7 @@ type Transactor interface {
 }
 ```
 
-Inside `WithinTx`, repositories should pick up the transaction from context or a unit-of-work object according to the project's existing convention. Do not start nested transactions accidentally.
+Inside `WithinTx`, repositories should pick up the transaction from context or a unit-of-work object according to the project's convention. Check for accidental nested transactions.
 
 Keep external network calls outside database transactions unless the business case explicitly requires holding the lock and the failure mode is understood.
 
@@ -79,12 +79,12 @@ This keeps `*sql.Tx`, `*gorm.DB`, Firestore transaction handles, and lock detail
 For commands retried by clients, workers, queues, or webhooks:
 
 - Accept or derive an idempotency key.
-- Store request identity and final outcome where appropriate.
+- Store request identity and final outcome when retries must receive the same response.
 - Use unique constraints for natural de-duplication.
 - Treat duplicate delivery as expected behavior.
-- Return the same logical result for the same command when possible.
+- Return the same logical result for the same command unless the API documents a different retry contract.
 
-Examples include payments, webhooks, queue consumers, email sends, and public POST endpoints.
+Common cases: payments, webhooks, queue consumers, email sends, and public POST endpoints.
 
 ## Locking And Concurrency
 
@@ -95,7 +95,7 @@ Choose deliberately:
 - `SELECT ... FOR UPDATE` or equivalent for short critical sections.
 - Serializable/repeatable-read isolation only when the use case needs it and tests cover it.
 
-Keep lock duration short. Do not hold locks while calling external APIs. Add stress/concurrency tests when locking behavior is important.
+Keep lock duration short. Do not hold locks while calling external APIs. Add stress/concurrency tests for lost-update, duplicate-insert, or deadlock-prone paths.
 
 ## Outbox Pattern
 

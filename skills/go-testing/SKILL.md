@@ -5,14 +5,14 @@ description: Write effective Go tests for domain logic, application services, HT
 
 # Go Testing
 
-Use this skill to test behavior with the smallest reliable scope. Read local test docs first; repo-specific gates such as `make test`, `make core-check`, `paralleltest`, adapter-test lints, or component-test lints override generic advice.
+Use this when a Go change needs tests or testability refactoring. Read local test docs first; repo-specific gates such as `make test`, `make core-check`, `paralleltest`, adapter-test lints, or component-test lints override this guidance.
 
 ## Testing Strategy
 
-Prefer this practical pyramid:
+Choose the lowest test level that can fail for the behavior under review:
 
 1. Domain tests with no IO.
-2. Application service tests with fakes for ports when orchestration has meaningful branching.
+2. Application service tests with fakes for ports when orchestration branches or error handling matters.
 3. Adapter/integration tests against real dependencies when behavior depends on SQL, serialization, provider clients, broker semantics, or concurrency.
 4. Component tests for full in-process service behavior with external edges mocked.
 5. End-to-end tests only for critical cross-service user workflows.
@@ -111,10 +111,10 @@ Keep error mapping tests near the transport layer.
 
 ## Component Tests
 
-Use component tests when you need confidence that a service works internally:
+Use component tests when unit tests cannot cover service wiring or in-process behavior:
 
 - Call real HTTP/gRPC/subscriber/direct-port entry points.
-- Use real app/domain/internal adapters where practical.
+- Use real app/domain/internal adapters unless they cross process, network, or provider boundaries.
 - Mock only external systems owned by other services or providers.
 - Assert public behavior: response, persisted state, emitted event, or query result.
 - Keep them faster and more focused than E2E tests.
@@ -154,6 +154,6 @@ For concurrent code:
 
 - Tests fail for business regressions, not incidental refactors.
 - Test setup makes dependencies and time explicit.
-- Integration tests cover behavior that unit tests cannot faithfully model.
-- The selected `go test` command has been run, or the reason it could not run is recorded.
+- Integration tests cover behavior that unit tests would fake incorrectly.
+- The selected `go test` command was run, or the blocker is recorded.
 - Slow or flaky tests have an explicit scope reason, not accidental sleeps or shared fixtures.

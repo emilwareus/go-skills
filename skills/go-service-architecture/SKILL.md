@@ -5,7 +5,7 @@ description: Structure Go services with clear package boundaries, dependency dir
 
 # Go Service Architecture
 
-Use this skill to keep Go services boring, explicit, and easy to change. Read local docs such as `ARCHITECTURE.md`, `CODE_PATTERNS.md`, `CLAUDE.md`, `AGENTS.md`, or `TESTING_GUIDELINES.md` before moving boundaries.
+Use this when package boundaries, dependency direction, or service wiring are part of a Go change. Read local docs such as `ARCHITECTURE.md`, `CODE_PATTERNS.md`, `CLAUDE.md`, `AGENTS.md`, or `TESTING_GUIDELINES.md` before moving code.
 
 ## Architecture Rule
 
@@ -44,7 +44,7 @@ internal/orders/
   postgres.go
 ```
 
-Split adapters when the package becomes hard to scan, has multiple transports/adapters, or needs mechanical import rules:
+Split adapters when one package now contains multiple transports, multiple infrastructure adapters, or import rules the repo enforces mechanically:
 
 ```text
 internal/orders/
@@ -55,11 +55,11 @@ internal/orders/
   service/
 ```
 
-Avoid copying a large template into a small service. Add folders when they reduce cognitive load or match local architecture.
+Avoid copying a large template into a small service. Add folders when the current package now has mixed responsibilities or the repo already uses that boundary.
 
 ## Application Services
 
-Application services coordinate IO, authorization, transaction scope, idempotency, logging/tracing boundaries, and domain calls. They should be easy to read top to bottom:
+Application services coordinate IO, authorization, transaction scope, idempotency, logging/tracing boundaries, and domain calls. Keep each handler focused on one workflow:
 
 ```go
 type PlaceOrderHandler struct {
@@ -83,7 +83,7 @@ Do not let application services become generic "manager" objects. Keep one metho
 
 ## Interfaces
 
-Define interfaces where they are consumed, not where implementations live. Repository interfaces often belong with the aggregate/domain when they express aggregate persistence; external service ports often belong in the app package that orchestrates them.
+Define interfaces where they are consumed, not where implementations live. Put repository interfaces with the aggregate/domain when they express aggregate persistence. Put external service ports in the app package that orchestrates them.
 
 Good:
 
@@ -103,7 +103,7 @@ type Database interface {
 }
 ```
 
-The interface should describe the business need of the use case, not the mechanics of a dependency. If an interface has many unrelated methods, split it by use case.
+The interface should describe the use case need, not the mechanics of a dependency. Split interfaces that mix unrelated workflows.
 
 ## Transport Layer
 
@@ -153,12 +153,12 @@ Keep wiring centralized so business packages do not import infrastructure packag
 - Search ports for repository/database imports.
 - Search domain for framework, SQL, broker, cloud, process, and telemetry imports.
 - Search app for concrete adapter imports unless the repo intentionally wires there.
-- Check whether commands and queries expose a clear application surface.
+- Check whether commands and queries are named entry points, not anonymous service methods.
 - Check whether component tests cover new wiring.
 
 ## Done Criteria
 
-- A new developer can trace a request from handler to use case to domain to adapter.
+- A request path has one visible route from handler to use case to domain to adapter.
 - Package imports show inward dependency direction.
 - Infrastructure can be swapped or faked without editing domain code.
 - Names describe workflows and domain concepts, not generic layers.

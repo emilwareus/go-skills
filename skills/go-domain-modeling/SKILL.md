@@ -5,7 +5,7 @@ description: Model business domains in Go with DDD-oriented entities, value obje
 
 # Go Domain Modeling
 
-Use this skill to make Go code express business behavior first and infrastructure second. Read local architecture docs before changing boundaries; preserve documented exceptions, but do not expand accidental infrastructure leakage in domain packages.
+Use this when a Go change touches business rules or domain package boundaries. Read local architecture docs before moving code. Keep domain packages independent of IO unless the repo documents an exception.
 
 ## Core Rules
 
@@ -50,7 +50,7 @@ internal/payments/
   service/
 ```
 
-Do not copy a folder template blindly. Add structure when it reduces cognitive load or matches the repo's established boundaries.
+Start with the repo's current layout. Split packages only when one package now mixes domain code with adapters, transports, or unrelated workflows.
 
 ## Entities And Value Objects
 
@@ -113,18 +113,16 @@ Choose aggregates by asking:
 - Will loading this aggregate require unbounded data?
 - Does the repository need one transaction/lock to save this aggregate?
 
-Avoid large aggregates that mirror an entire database relationship graph. If a command needs many aggregates, it is usually an application service workflow, an eventual-consistency flow, or a sign that the consistency rule is unclear.
+Avoid aggregates that mirror an entire database relationship graph. If one command needs many aggregates, classify the case before coding: application workflow, eventual-consistency flow, or unclear consistency rule.
 
 ## Domain Services
 
 Use a domain service only when behavior belongs to the domain but not naturally to one entity or value object. If the service fetches from a database, calls a provider, emits logs, opens transactions, or uses HTTP, it is not a pure domain service.
 
-Keep domain services pure when possible:
+Keep domain services pure:
 
 ```go
-type PricingPolicy struct {
-    clock Clock
-}
+type PricingPolicy struct{}
 
 func (p PricingPolicy) Price(order Order, customer Customer) (Money, error) {
     // domain decision, no SQL or HTTP
@@ -141,7 +139,7 @@ If external data is required, pass already-loaded domain data into the service. 
 - Creating generic repository abstractions before there are multiple implementations.
 - Encoding workflow state as loose strings used across many packages.
 - Using domain events to hide synchronous dependencies that should be explicit.
-- Letting test difficulty push IO into domain code.
+- Moving IO into domain code to make a test easier to write.
 
 ## Review Checklist
 
@@ -153,7 +151,7 @@ If external data is required, pass already-loaded domain data into the service. 
 
 ## Done Criteria
 
-- Domain code can be tested without network, database, broker, provider, filesystem, process, or framework setup.
-- Business invariants are enforced by constructors or methods, not comments.
-- Application services orchestrate; domain objects decide.
-- Package names match the team's business language.
+- Domain tests run without network, database, broker, provider, filesystem, process, or framework setup.
+- Constructors and methods enforce invariants that comments or handlers used to describe.
+- Application services orchestrate IO; domain objects enforce rules.
+- Package names use the team's business language.

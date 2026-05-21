@@ -5,14 +5,14 @@ description: Build Go event-driven workflows with Watermill, Pub/Sub, CQRS comma
 
 # Go Event-Driven Watermill
 
-Use this skill when a Go workflow needs asynchronous messaging or reliable event publication. Keep Watermill and broker details outside pure domain code; inject small publisher/subscriber/application interfaces at the boundary that needs them.
+Use this when a Go workflow needs asynchronous messaging, Watermill routing, or reliable event publication. Keep Watermill and broker details outside pure domain code; inject small publisher, subscriber, or application interfaces at the boundary that needs them.
 
 ## Message Design
 
 - Publish events as facts that already happened in the publishing domain.
 - Do not name events as commands to downstream services.
-- Keep event payloads stable and versionable.
-- Include aggregate IDs, tenant/org IDs, occurred-at timestamps, and correlation IDs when useful.
+- Evolve event payloads with additive fields or explicit versioning.
+- Include aggregate IDs, tenant/org IDs, occurred-at timestamps, and correlation IDs when consumers need them.
 - Avoid leaking private database or provider details into event contracts.
 - Make consumers idempotent; duplicate delivery is expected.
 
@@ -60,7 +60,7 @@ Middleware order matters. A common order is correlation first, retry around hand
 
 ## Application Boundary
 
-Do not make Watermill message handlers contain business logic. Handlers should translate message payloads into application commands/queries:
+Do not put business rules in Watermill callbacks. Translate message payloads into application commands or queries:
 
 ```go
 type OnInvoiceApproved struct {
@@ -75,7 +75,7 @@ func (h OnInvoiceApproved) Handle(ctx context.Context, event *InvoiceApproved) e
 }
 ```
 
-Application services should depend on narrow event publisher interfaces:
+Application services depend on narrow event publisher interfaces:
 
 ```go
 type EventPublisher interface {
@@ -107,7 +107,7 @@ Watermill SQL Pub/Sub plus Forwarder is a common implementation.
 
 When order matters:
 
-- Define the ordering key, usually aggregate ID or tenant+aggregate ID.
+- Define the ordering key, such as aggregate ID or tenant+aggregate ID.
 - Choose broker/topic/partition config that preserves that order.
 - Keep one ordered stream per consistency need, not one global bottleneck.
 - Make handlers tolerate replay after partial failure.

@@ -2,9 +2,9 @@
 
 [![skills.sh](https://skills.sh/b/emilwareus/go-skills)](https://skills.sh/emilwareus/go-skills)
 
-Reusable Go engineering skills for agentic coding workflows. The skills focus on domain-first Go backend development: explicit business modeling, clear service boundaries, practical persistence, reliable tests, event-driven workflows, and diagnosable failures.
+Reusable Go engineering skills for agent-assisted work in Go services. They cover domain modeling, service boundaries, persistence, tests, event-driven workflows, and failure handling.
 
-These skills are original packaging for reusable Go project guidance inspired by common Go DDD and service architecture practices, including patterns often discussed in the Three Dots Labs ecosystem. This project is not affiliated with Three Dots Labs.
+The skills are not project templates. They tell an agent what to inspect, where code belongs, what tradeoffs to name, and what to verify. They are informed by Go DDD and service architecture practices, including patterns discussed in the Three Dots Labs ecosystem. This project is not affiliated with Three Dots Labs.
 
 ## Install
 
@@ -30,12 +30,12 @@ npx skills add emilwareus/go-skills --global
 
 | Skill | Use when |
 | --- | --- |
-| `go-domain-modeling` | Modeling Go business domains with entities, value objects, aggregates, invariants, and domain services. |
-| `go-service-architecture` | Structuring Go services with handlers, application use cases, dependency direction, adapters, and explicit wiring. |
-| `go-persistence-transactions` | Designing repositories, database adapters, migrations, transaction boundaries, idempotency, locking, and outbox flows. |
-| `go-testing` | Writing focused Go tests for domain logic, application services, handlers, repositories, concurrency, and integrations. |
-| `go-errors-observability` | Handling Go errors, structured logging, metrics, tracing, and API error mapping. |
-| `go-event-driven-watermill` | Building event-driven Go workflows with Watermill, CQRS buses, routers, middleware, outbox/forwarder, and idempotent consumers. |
+| `go-domain-modeling` | Put business rules in entities, value objects, aggregates, and domain services. |
+| `go-service-architecture` | Place code in ports, app, domain, adapters, and composition packages. |
+| `go-persistence-transactions` | Design repositories, migrations, transactions, locking, idempotency, and outbox flows. |
+| `go-testing` | Choose unit, application, adapter, component, integration, and event-driven test scopes. |
+| `go-errors-observability` | Classify errors and add structured logs, metrics, traces, and protocol mappings. |
+| `go-event-driven-watermill` | Build Watermill routers, CQRS buses, outbox/forwarders, and idempotent consumers. |
 
 ## Repository Layout
 
@@ -62,8 +62,8 @@ Each skill follows the open Agent Skills format: a directory containing a `SKILL
 Validate basic package shape:
 
 ```bash
-find skills -name SKILL.md -maxdepth 3 -print
+find skills -maxdepth 3 -name SKILL.md -print
 npx skills add . --list
 ```
 
-Keep each skill focused and portable across projects. Add examples only when they teach a reusable decision, and avoid project-specific conventions unless they are clearly marked as optional.
+Keep each skill portable. Add examples only when they change a decision an agent would make. Mark project-specific conventions as optional.
