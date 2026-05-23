@@ -133,6 +133,16 @@ Use the smallest scope that covers the risk:
 - Use bounded eventual assertions instead of fixed sleeps.
 - Test duplicate delivery.
 
+## Examples
+
+Annotated reference implementations live in `examples/`. They mirror the code from the Three Dots Labs [Distributed Transactions in Go](https://threedots.tech/post/distributed-transactions-in-go/) post — same `User` aggregate, `UsePointsAsDiscount` command, and `PointsUsedForDiscount` event — with extra teaching comments so each file reads standalone:
+
+- [`examples/handler_returns_events.go`](examples/handler_returns_events.go) — the article's three-version evolution of the handler: distributed monolith → publish-after-commit → outbox via `UpdateByID(ctx, id, func(*User) (bool, []any, error))`. Includes the consuming `OnPointsUsedForDiscountHandler` that maps the event to an `AddDiscount` command.
+- [`examples/outbox/repository.go`](examples/outbox/repository.go) — the outbox-aware `UpdateByID` body: same load → mutate → save shape as the persistence skill's `update_fn.go`, with event INSERTs into the outbox in the same transaction.
+- [`examples/outbox/schema.sql`](examples/outbox/schema.sql) — hand-rolled equivalent of Watermill SQL Pub/Sub's table, with a partial index on pending rows.
+- [`examples/outbox/forwarder.go`](examples/outbox/forwarder.go) — hand-rolled equivalent of Watermill's Forwarder, using `SELECT ... FOR UPDATE SKIP LOCKED` for safe multi-replica draining.
+- [`examples/idempotent_consumer.go`](examples/idempotent_consumer.go) — supplementary: `processed_messages` dedup applied to `OnPointsUsedForDiscountHandler`, plus the unique-constraint shortcut when the side effect has a natural key.
+
 ## Done Criteria
 
 - Event names are facts from the publishing domain.

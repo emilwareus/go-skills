@@ -142,6 +142,15 @@ Use real database tests for:
 
 Avoid mocking a repository to prove a SQL method was called. That does not test persistence behavior.
 
+## Examples
+
+Annotated reference implementations live in `examples/`. They mirror the code from the Three Dots Labs [Database Transactions in Go](https://threedots.tech/post/database-transactions-in-go/) post — same `User` aggregate, `UsePointsAsDiscount` command, and `UpdateByID` signatures — with extra teaching comments so each file reads standalone:
+
+- [`examples/transactor.go`](examples/transactor.go) — the article's `runInTx` helper plus the `TransactionProvider` + `Adapters` pattern for the case where multiple repositories (e.g. `UserRepository` + `AuditLogRepository`) must commit together.
+- [`examples/update_fn.go`](examples/update_fn.go) — the article's full `UpdateByID(ctx, userID, func(*User) (bool, error))` body against the `User`/`Discounts` aggregate, with the two `SELECT ... FOR UPDATE` loads and the two-table write.
+- [`examples/idempotency.go`](examples/idempotency.go) — supplementary: `INSERT ... ON CONFLICT DO NOTHING` idempotency-key store applied to the `UsePointsAsDiscount` command so retries replay the same result.
+- [`examples/optimistic_lock.go`](examples/optimistic_lock.go) — supplementary: version-column alternative to `FOR UPDATE` on the same `User` aggregate, with guidance on when each is the right choice.
+
 ## Done Criteria
 
 - Transaction scope matches one business consistency boundary.
