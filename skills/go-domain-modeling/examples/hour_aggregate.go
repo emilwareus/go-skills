@@ -1,20 +1,19 @@
-// hour_aggregate.go is the Hour aggregate from the Three Dots Labs
-// DDD Lite article — the central worked example of the post.
+// hour_aggregate.go demonstrates the Hour aggregate pattern.
 //
 // The pattern in three sentences:
 //
-//   1. All fields are unexported. Outside callers can't reach in
-//      and break invariants by direct assignment.
-//   2. State transitions go through methods named after business
-//      actions (ScheduleTraining, CancelTraining, MakeAvailable),
-//      each of which checks that the transition is currently legal.
-//   3. Queries (IsAvailable, HasTrainingScheduled) read state
-//      without changing it, so they can be called freely.
+//  1. All fields are unexported. Outside callers can't reach in
+//     and break invariants by direct assignment.
+//  2. State transitions go through methods named after business
+//     actions (ScheduleTraining, CancelTraining, MakeAvailable),
+//     each of which checks that the transition is currently legal.
+//  3. Queries (IsAvailable, HasTrainingScheduled) read state
+//     without changing it, so they can be called freely.
 //
 // What this prevents: the "anemic domain" trap where Hour would be
 // a public struct with public fields, and the rules about *when*
 // you can schedule a training would live in three different
-// handlers (HTTP, gRPC, worker) — none of which agree.
+// handlers (HTTP, gRPC, worker) - none of which agree.
 package examples
 
 import (
@@ -51,10 +50,9 @@ type Hour struct {
 // below), so a Hour value handed back from this function is always
 // safe to use.
 //
-// The article shows multiple constructors (NewAvailableHour,
-// NewNotAvailableHour) rather than one constructor with a flag.
-// Many small named constructors read better than one with an
-// Availability parameter the caller has to remember the meaning of.
+// Multiple small named constructors read better than one constructor
+// with an Availability parameter the caller has to remember the
+// meaning of.
 func NewAvailableHour(hour time.Time) (*Hour, error) {
 	if err := validateTime(hour); err != nil {
 		return nil, err
@@ -76,8 +74,8 @@ func NewNotAvailableHour(hour time.Time) (*Hour, error) {
 }
 
 // ScheduleTraining is the kind of method that makes this pattern
-// pay off. It encodes a business rule — "you can only schedule a
-// training on an available hour" — at the *only* point where a
+// pay off. It encodes a business rule - "you can only schedule a
+// training on an available hour" - at the *only* point where a
 // transition to TrainingScheduled is possible. There is no way to
 // bypass it short of editing this file.
 func (h *Hour) ScheduleTraining() error {
@@ -113,14 +111,14 @@ func (h *Hour) IsAvailable() bool          { return h.availability == Available 
 func (h *Hour) HasTrainingScheduled() bool { return h.availability == TrainingScheduled }
 
 // Accessors for fields callers genuinely need. Don't auto-generate
-// a getter for every field — only expose what callers actually use.
+// a getter for every field - only expose what callers actually use.
 // If a getter has no caller, deleting it makes the API smaller.
-func (h *Hour) Time() time.Time             { return h.hour }
-func (h *Hour) Availability() Availability  { return h.availability }
+func (h *Hour) Time() time.Time            { return h.hour }
+func (h *Hour) Availability() Availability { return h.availability }
 
 // validateTime is the domain rule for "what counts as a valid
 // scheduling slot". Kept private so the constructors are the only
-// callers — there is no need to expose it.
+// callers - there is no need to expose it.
 func validateTime(t time.Time) error {
 	if t.IsZero() {
 		return errors.New("zero time is not a valid hour")

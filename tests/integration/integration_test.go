@@ -2,7 +2,7 @@
 // pattern: exercise real persistence behavior against a real
 // database. Tests UpdateByID with FOR UPDATE concurrency.
 //
-// What this test exists to catch — and what unit tests cannot:
+// What this test exists to catch - and what unit tests cannot:
 //
 //   - Real lock behavior. Two goroutines calling UpdateByID for
 //     the same user MUST serialize via FOR UPDATE. A unit test
@@ -11,20 +11,18 @@
 //
 //   - Constraint and isolation semantics. Unique constraints,
 //     CHECK constraints, deferred constraints, default isolation
-//     levels — all are database-specific and not reproducible
+//     levels - all are database-specific and not reproducible
 //     in a mock.
 //
 //   - Migration compatibility. Running the test against the
 //     real, migrated schema catches a stale ALTER TABLE that
 //     nobody noticed.
 //
-// The harness is a placeholder. The cited Three Dots Labs
-// integration-testing article uses docker-compose for the local
-// database; a real project would use that or its existing harness,
-// run migrations once, and give each test its own row space via
-// unique IDs.
+// The harness is a placeholder. A real project would use its local
+// database harness, run migrations once, and give each test its own
+// row space via unique IDs.
 //
-// Lives in tests/ at repo root — see top-level README.
+// Lives in tests/ at repo root - see top-level README.
 package integration
 
 import (
@@ -102,7 +100,7 @@ func TestUpdateByID_SerializesConcurrentWrites(t *testing.T) {
 	assert.Equal(t, 40, finalPoints, "final balance must reflect serialized debits")
 }
 
-// ── Fixture isolation ─────────────────────────────────────────────
+// Fixture isolation
 //
 // Unique IDs per test mean two tests running in parallel against
 // the same database cannot collide on rows. Combined with
@@ -115,7 +113,7 @@ func uniqueUserID(t *testing.T) int {
 	return int(time.Now().UnixNano() & 0x7FFFFFFF)
 }
 
-// ── Stubs ─────────────────────────────────────────────────────────
+// Stubs
 //
 // In a real project these come from the repository package under
 // test (PostgresUserRepository from
@@ -136,7 +134,7 @@ func NewPostgresUserRepository(db *sql.DB) *PostgresUserRepository {
 	return &PostgresUserRepository{db: db}
 }
 
-// UpdateByID — see the persistence skill for the annotated
+// UpdateByID - see the persistence skill for the annotated
 // version. Body omitted in this stub.
 func (r *PostgresUserRepository) UpdateByID(
 	ctx context.Context,

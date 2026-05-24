@@ -37,9 +37,9 @@ npx skills add emilwareus/go-skills --global
 | `go-errors-observability` | Classify wrapped errors and map stable slug errors at boundaries. |
 | `go-event-driven-watermill` | Build Watermill-style event flows and outbox/forwarder patterns. |
 
-## Core Concepts and Source Articles
+## Core Concepts
 
-Each skill teaches a set of patterns drawn from the Three Dots Labs Go ecosystem. Some linked articles are direct sources for mirrored examples; others are supporting references that inform the SKILL.md guidance.
+Each skill teaches reusable Go patterns. The reference links show where many of the patterns came from, but the skills themselves are written as operating guidance rather than article summaries.
 
 ### `go-domain-modeling`
 
@@ -51,32 +51,32 @@ Each skill teaches a set of patterns drawn from the Three Dots Labs Go ecosystem
 - Illegal transitions return sentinel errors compared with `errors.Is`.
 - Domain code stays free of HTTP, SQL, ORM, brokers, filesystems, frameworks, and telemetry.
 
-**Source articles**
+**References**
 
-- [Introduction to DDD Lite: When microservices in Go are not enough](https://threedots.tech/post/ddd-lite-in-go-introduction/) — source of the `Hour` aggregate code
-- [Combining DDD, CQRS, and Clean Architecture in Go](https://threedots.tech/post/ddd-cqrs-clean-architecture-combined/) — synthesis with the architecture skill
-- [Safer Enums in Go](https://threedots.tech/post/safer-enums-in-go/) — typed-int `Availability` pattern
-- [Common Anti-Patterns in Go Web Applications](https://threedots.tech/post/common-anti-patterns-in-go-web-applications/) — anemic models and validation-only-at-HTTP
+- [Introduction to DDD Lite: When microservices in Go are not enough](https://threedots.tech/post/ddd-lite-in-go-introduction/)
+- [Combining DDD, CQRS, and Clean Architecture in Go](https://threedots.tech/post/ddd-cqrs-clean-architecture-combined/)
+- [Safer Enums in Go](https://threedots.tech/post/safer-enums-in-go/)
+- [Common Anti-Patterns in Go Web Applications](https://threedots.tech/post/common-anti-patterns-in-go-web-applications/)
 
 ### `go-service-architecture`
 
 **Core concepts**
 
-- Inward dependency direction: ports/transports → app/use cases → domain; adapters/infrastructure → app/use cases → domain.
+- Inward dependency direction: ports/transports -> app/use cases -> domain; adapters/infrastructure -> app/use cases -> domain.
 - Narrow ports defined where consumed, not where implemented (`trainingRepository`, `userService`, `trainerService` in the handler package, not in adapter packages).
 - Clean Architecture uses a cohesive multi-method `TrainingService`; the CQRS post splits workflows into command/query handlers (`CancelTrainingHandler`, `AvailableHoursHandler`).
 - CQRS split between aggregate-loading command handlers and DTO-returning query handlers reading through `*ReadModel` interfaces.
 - `Application{Commands, Queries}` groups the CQRS handlers for composition; handlers still never see `*sql.DB` or a gRPC client.
 
-**Source articles**
+**References**
 
-- [How to implement Clean Architecture in Go (Golang)](https://threedots.tech/post/introducing-clean-architecture/) — source of the layer vocabulary and multi-method `TrainingService` contrast
-- [How to use basic CQRS in Go](https://threedots.tech/post/basic-cqrs-in-go/) — source of the command/query handler shape
+- [How to implement Clean Architecture in Go (Golang)](https://threedots.tech/post/introducing-clean-architecture/)
+- [How to use basic CQRS in Go](https://threedots.tech/post/basic-cqrs-in-go/)
 - [Combining DDD, CQRS, and Clean Architecture in Go](https://threedots.tech/post/ddd-cqrs-clean-architecture-combined/)
 - [When using Microservices or Modular Monolith in Go can be just a detail?](https://threedots.tech/post/microservices-or-monolith-its-detail/)
 - [The Best Go framework: no framework?](https://threedots.tech/post/best-go-framework/)
-- [Increasing Cohesion in Go with Generic Decorators](https://threedots.tech/post/increasing-cohesion-in-go-with-generic-decorators/) — bus/handler decoration pattern
-- [The Over-Engineering Pendulum](https://threedots.tech/post/the-over-engineering-pendulum/) — when not to split
+- [Increasing Cohesion in Go with Generic Decorators](https://threedots.tech/post/increasing-cohesion-in-go-with-generic-decorators/)
+- [The Over-Engineering Pendulum](https://threedots.tech/post/the-over-engineering-pendulum/)
 - [Software Dark Ages](https://threedots.tech/post/software-dark-ages/)
 
 ### `go-persistence-transactions`
@@ -84,15 +84,15 @@ Each skill teaches a set of patterns drawn from the Three Dots Labs Go ecosystem
 **Core concepts**
 
 - `runInTx` helper owning BEGIN/COMMIT/ROLLBACK so business code never holds a `*sql.Tx`.
-- `UpdateFn` repository pattern (`UpdateByID(ctx, id, func(*User) (bool, error))`) — load → mutate → save under one tx, with `SELECT ... FOR UPDATE` for short critical sections.
+- `UpdateFn` repository pattern (`UpdateByID(ctx, id, func(*User) (bool, error))`) - load -> mutate -> save under one tx, with `SELECT ... FOR UPDATE` for short critical sections.
 - `TransactionProvider` + `Adapters` fallback for the case where multiple repositories must commit together; every cross-repo read that relies on locks must remember `FOR UPDATE`.
-- Anti-patterns from the article: `*sql.Tx` in method signatures, one-repo-per-table thinking, and handler-orchestrated `GetX`/`TakeX`/`AddY` splits.
+- Anti-patterns to catch: `*sql.Tx` in method signatures, one-repo-per-table thinking, and handler-orchestrated `GetX`/`TakeX`/`AddY` splits.
 
-**Source articles**
+**References**
 
-- [Database Transactions in Go with Layered Architecture](https://threedots.tech/post/database-transactions-in-go/) — source of `runInTx`, `UpdateByID`, `TransactionProvider`
-- [The Repository pattern in Go](https://threedots.tech/post/repository-pattern-in-go/) — in-memory / MySQL / Firestore variants of the same interface
-- [Repository secure by design](https://threedots.tech/post/repository-secure-by-design/) — tenant isolation in queries
+- [Database Transactions in Go with Layered Architecture](https://threedots.tech/post/database-transactions-in-go/)
+- [The Repository pattern in Go](https://threedots.tech/post/repository-pattern-in-go/)
+- [Repository secure by design](https://threedots.tech/post/repository-secure-by-design/)
 
 ### `go-event-driven-watermill`
 
@@ -100,48 +100,48 @@ Each skill teaches a set of patterns drawn from the Three Dots Labs Go ecosystem
 
 - Events as past-tense facts from the publishing domain; never name an event after a downstream service's action.
 - Application boundary: business rules live in command/query handlers; Watermill callbacks translate messages into commands and stop.
-- Outbox pattern with Watermill SQL Pub/Sub + Forwarder in the article; this repo's `examples/outbox/*` files are hand-rolled illustrations of the same mechanism.
+- Outbox pattern with Watermill SQL Pub/Sub + Forwarder; this repo's `examples/outbox/*` files are hand-rolled illustrations of the same mechanism.
 - The `UpdateByID` outbox variant: closure returns `(bool, []any, error)` so the aggregate decides which events occurred and the repo persists them in the same tx.
 - At-least-once delivery is the default contract; consumers must make side effects idempotent.
 
-**Source articles**
+**References**
 
-- [Distributed Transactions in Go: Read Before You Try](https://threedots.tech/post/distributed-transactions-in-go/) — source of all three handler versions and the outbox `UpdateByID` shape
-- [Introducing Watermill — Go event-driven applications library](https://threedots.tech/post/introducing-watermill/)
-- [Using MySQL as a Pub/Sub](https://threedots.tech/post/when-sql-database-makes-great-pub-sub/) — motivation for SQL-backed transactional publishing
-- [Watermill 1.5 / 1.4 release notes](https://threedots.tech/post/watermill-1-5/) — current API surface for `message.Publisher`/`Subscriber`/`Router`
+- [Distributed Transactions in Go: Read Before You Try](https://threedots.tech/post/distributed-transactions-in-go/)
+- [Introducing Watermill - Go event-driven applications library](https://threedots.tech/post/introducing-watermill/)
+- [Using MySQL as a Pub/Sub](https://threedots.tech/post/when-sql-database-makes-great-pub-sub/)
+- [Watermill 1.5 / 1.4 release notes](https://threedots.tech/post/watermill-1-5/)
 
 ### `go-testing`
 
 **Core concepts**
 
-- Test scope ladder: domain unit → application service (fakes) → adapter/integration (real deps) → component (real in-process service) → E2E (only critical flows).
+- Test scope ladder: domain unit -> application service (fakes) -> adapter/integration (real deps) -> component (real in-process service) -> E2E (only critical flows).
 - Table tests for input/output variation with named cases; `for i := range tests { tc := tests[i] }` when subtests are parallelized.
-- Fakes over generated mocks for narrow interfaces — assert on observable state, not on call sequence.
-- Real-database integration tests for SQL constraints, locking, isolation, and migration compatibility, using the article's docker-compose-style local harness.
+- Fakes over generated mocks for narrow interfaces - assert on observable state, not on call sequence.
+- Real-database integration tests for SQL constraints, locking, isolation, and migration compatibility, using a docker-compose-style local harness or the repo's equivalent.
 - Bounded eventual assertions (`assert.EventuallyWithT`) for event-driven flows; per-test correlation IDs to filter parallel tests.
 - Deliberate parallelism: `vgt`, `paralleltest`, `-parallel` vs `-p`, unique IDs, and avoiding `t.Parallel()` on fast unit tests.
 
-**Source articles**
+**References**
 
-- [4 practical principles of high-quality database integration tests in Go](https://threedots.tech/post/database-integration-testing/) — reflected in `tests/integration/`
-- [Optimising and Visualising Go Tests Parallelism](https://threedots.tech/post/go-test-parallelism/) — reflected in selective `t.Parallel()` use and fixture conventions
-- [Microservices test architecture. Can you sleep well without end-to-end tests?](https://threedots.tech/post/microservices-test-architecture/) — anchors the "component over E2E" stance
+- [4 practical principles of high-quality database integration tests in Go](https://threedots.tech/post/database-integration-testing/)
+- [Optimising and Visualising Go Tests Parallelism](https://threedots.tech/post/go-test-parallelism/)
+- [Microservices test architecture. Can you sleep well without end-to-end tests?](https://threedots.tech/post/microservices-test-architecture/)
 
 ### `go-errors-observability`
 
 **Core concepts**
 
-- Sentinel errors and typed slug errors compared with `errors.Is` / `errors.As` — never string matching.
+- Sentinel errors and typed slug errors compared with `errors.Is` / `errors.As` - never string matching.
 - Wild Workouts-style slug helpers: `NewIncorrectInputError`, `NewAuthorizationError`, `httperr.RespondWithSlugError`, `httperr.InternalError`, and `httperr.Unauthorised`.
 - Wrap with `%w` to add operation context; classify and translate at the transport boundary.
 - Log unexpected errors once at the transport/worker boundary, never at every stack frame.
 
-**Source articles**
+**References**
 
-- [Common Anti-Patterns in Go Web Applications](https://threedots.tech/post/common-anti-patterns-in-go-web-applications/) — closest article anchor for logging discipline and error wrapping
+- [Common Anti-Patterns in Go Web Applications](https://threedots.tech/post/common-anti-patterns-in-go-web-applications/)
 
-This skill is authored synthesis, not an article-mirrored skill. Its examples use Wild Workouts' slug-error and `httperr` concepts, plus general wrapping/logging guidance.
+This skill is authored synthesis. Its examples use Wild Workouts' slug-error and `httperr` concepts, plus general wrapping/logging guidance.
 
 ## Repository Layout
 
@@ -172,7 +172,7 @@ tests/                       # not shipped; repo-only worked tests demonstrating
   integration/
 ```
 
-Each skill follows the open Agent Skills format: a directory containing a `SKILL.md` file with YAML frontmatter containing `name` and `description`. The `examples/` directories ship alongside each skill; article-mirrored examples are called out explicitly in the relevant skill docs. Test files live in the top-level `tests/` directory so they are NOT shipped to consumers — they exist to demonstrate the `go-testing` skill's patterns and to keep the test patterns continuously validated by `go test`.
+Each skill follows the open Agent Skills format: a directory containing a `SKILL.md` file with YAML frontmatter containing `name` and `description`. The `examples/` directories ship alongside each skill and demonstrate the relevant patterns. Test files live in the top-level `tests/` directory so they are NOT shipped to consumers - they exist to demonstrate the `go-testing` skill's patterns and to keep the test patterns continuously validated by `go test`.
 
 ## Development
 
@@ -191,6 +191,6 @@ go build ./...
 go test ./tests/... -short    # -short skips the placeholder integration test
 ```
 
-The repo is a single Go module (`github.com/emilwareus/go-skills`); each `examples/` directory is a real Go package so signature drift between the article-mirroring code and reality is caught at compile time.
+The repo is a single Go module (`github.com/emilwareus/go-skills`); each `examples/` directory is a real Go package so signature drift in examples is caught at compile time.
 
 Keep each skill portable. Add examples only when they change a decision an agent would make. Mark project-specific conventions as optional.

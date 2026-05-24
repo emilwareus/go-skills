@@ -1,43 +1,31 @@
 ---
 name: go-errors-observability
-description: Design Go error handling with wrapped errors, sentinel and typed error contracts, stable slug errors, boundary classification, and HTTP error mapping. Use for Go tasks involving error packages, public API error responses, wrapping with %w, errors.Is/errors.As, or avoiding duplicate logs.
+description: Design Go error handling with wrapped errors, sentinel and typed error contracts, stable slug errors, boundary classification, and HTTP error mapping. Use for Go tasks involving public API errors, wrapping with %w, errors.Is/errors.As, or avoiding duplicate logs.
 ---
 
 # Go Errors And Observability
 
-Use this when a Go change touches error contracts, wrapping, logging boundaries, or protocol error mapping. This skill is a small authored synthesis. It is not backed by a dedicated Three Dots Labs observability article; the examples use Wild Workouts' slug-error and `httperr` concepts.
+Use this when a change touches error contracts, wrapping, logging boundaries, or protocol error mapping. Preserve error classification through the stack and translate errors once at the boundary. Keep the implementation small: wrapped errors, sentinel or typed contracts, slug responses, and one logging boundary.
 
-## Error Principles
+## Error Contracts
 
-- Return errors; do not log and return the same error at every layer.
-- Wrap implementation failures with operation context using `%w`.
-- Use sentinel errors when callers only need a stable category.
-- Use typed errors when the boundary needs structured information.
-- Use stable slugs for public API errors.
-- Classify errors at the transport or worker boundary.
-- Do not expose database, provider, stack, or secret internals in public responses.
-
-## Slug Pattern
-
-Wild Workouts uses slug errors for application/domain failures that cross into HTTP:
+Use stable sentinels when callers need category checks:
 
 ```go
-return errors.NewIncorrectInputError("date-from-after-date-to", "Date from after date to")
+var ErrTrainingNotFound = errors.New("training not found")
 ```
 
-Use the slug as API surface and the human message as diagnostic text. At the boundary, map the typed slug error to a response:
+Use typed slug errors when public responses need stable machine-readable identifiers:
 
 ```go
-httperr.RespondWithSlugError(err, w, r)
-httperr.InternalError("cannot-get-user", err, w, r)
-httperr.Unauthorised("invalid-role", nil, w, r)
+return NewIncorrectInputError("date-from-after-date-to", "Date from after date to")
 ```
 
-Do not string-match `err.Error()` in handlers.
+Public response slugs are API surface. Keep them stable and documented by tests. Use the human message for client-facing or diagnostic text, not for classification.
 
 ## Wrapping
 
-Wrap where context is added:
+Wrap where new operation context is added:
 
 ```go
 training, err := r.loadTraining(ctx, id)
@@ -46,24 +34,49 @@ if err != nil {
 }
 ```
 
-The boundary should still be able to use `errors.Is` for sentinels and `errors.As` for typed slug errors after wrapping.
+Boundary code should still classify wrapped errors with `errors.Is` and `errors.As`.
+
+## HTTP Mapping
+
+Centralize HTTP error mapping:
+
+```go
+func RespondWithSlugError(err error, w http.ResponseWriter, r *http.Request) {
+    var slugErr SlugError
+    if errors.As(err, &slugErr) {
+        writeSlugResponse(slugErr, w, r)
+        return
+    }
+    InternalError("internal-server-error", err, w, r)
+}
+```
+
+Map expected input and authorization errors to stable client responses. Map unexpected failures to an internal slug and log the wrapped error with request metadata.
 
 ## Logging
 
-Log unexpected failures once at the transport or worker boundary, with request/message metadata and the final wrapped error. Do not add another error log in every repository, handler, and adapter frame.
+Log unexpected failures once at the transport or worker boundary. Include stable identifiers such as request ID, route, message ID, aggregate ID, and slug. Keep secrets, raw payloads, tokens, and provider internals out of public responses and logs.
 
-Expected user-input and authorization outcomes can be returned as slug errors without error-level logs unless the product needs an audit trail.
+Expected user-input and authorization outcomes can return slug errors without error-level logs unless the product needs an audit trail.
+
+## Anti-Patterns
+
+- String-matching `err.Error()` in handlers or workers.
+- Returning raw database, provider, stack, token, or secret-bearing error strings in public responses.
+- Logging the same returned error in every repository, handler, adapter, and transport frame.
+- Wrapping with `%v` or rebuilding errors in a way that breaks `errors.Is` and `errors.As`.
+- Creating new public slugs casually; slug changes are API changes.
+- Turning every error into a typed public error when only one internal caller needs a category.
+- Swallowing unexpected errors at the boundary without logging enough request or message context.
 
 ## Examples
 
-Annotated reference implementations live in `examples/`:
-
-- [`examples/error_types.go`](examples/error_types.go) — the slug-error shape, `NewIncorrectInputError`, `NewAuthorizationError`, a sentinel error, and `%w` wrapping.
-- [`examples/http_mapping.go`](examples/http_mapping.go) — Wild Workouts-style `InternalError`, `Unauthorised`, `BadRequest`, and `RespondWithSlugError` helpers.
+- [`examples/error_types.go`](examples/error_types.go) - slug-error type, constructors, sentinel error, and `%w` wrapping.
+- [`examples/http_mapping.go`](examples/http_mapping.go) - `InternalError`, `Unauthorised`, `BadRequest`, and `RespondWithSlugError` helpers.
 
 ## Done Criteria
 
-- Callers can distinguish expected user/input/auth failures from unexpected failures.
-- Public responses use stable slugs, not raw internal error strings.
-- Wrapped errors preserve `errors.Is` / `errors.As` classification.
-- Unexpected errors are logged once at the boundary with enough context to debug.
+- Public responses use stable slugs.
+- Wrapped errors preserve `errors.Is` and `errors.As` classification.
+- Error-to-protocol mapping is centralized at the boundary.
+- Unexpected errors are logged once with enough context to debug.

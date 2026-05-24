@@ -1,6 +1,6 @@
 // Package handler demonstrates testing an application command
-// handler with fakes — the "fakes over mocks" rule from the
-// go-testing skill. The handler under test mirrors
+// handler with fakes - the "fakes over mocks" rule from the
+// go-testing skill. The handler under test follows the same shape as
 // CancelTrainingHandler from
 // skills/go-service-architecture/examples/command_handler.go.
 //
@@ -21,7 +21,7 @@
 //     calls and configured returns, which gets verbose fast.
 //
 // Lives in tests/ at repo root rather than skills/ so it is not
-// shipped with any skill — see top-level README for the rationale.
+// shipped with any skill - see top-level README for the rationale.
 package handler
 
 import (
@@ -96,7 +96,7 @@ func TestCancelTrainingHandler(t *testing.T) {
 	})
 }
 
-// ── Fakes ─────────────────────────────────────────────────────────
+// Fakes
 //
 // Each fake satisfies one of the handler's narrow interfaces and
 // records what happened in plain Go fields. Tests assert on those
@@ -161,7 +161,7 @@ func newFakes() fakeBundle {
 	}
 }
 
-// ── Handler under test (stubs of the real example) ────────────────
+// Handler under test (stubs of the real example)
 //
 // In a real test file these would come from the handler package
 // under test. See

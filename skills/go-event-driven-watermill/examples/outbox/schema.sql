@@ -1,13 +1,11 @@
 -- outbox/schema.sql defines the table that turns "publish to broker"
 -- into "INSERT into a local table". Once the row is committed, the
--- outbox is the system of record for that message — the forwarder
+-- outbox is the system of record for that message - the forwarder
 -- guarantees delivery from there.
 --
--- Relationship to the article: the Three Dots Labs post uses
--- Watermill's SQL Pub/Sub, which manages its own table layout (with
--- offsets/ack state). This schema is the hand-rolled equivalent so
--- you can see what's stored and why. The pattern is the same; only
--- the column names differ.
+-- Watermill SQL Pub/Sub manages its own table layout with offsets
+-- and ack state. This schema shows the same table-backed publish
+-- idea with explicit columns.
 --
 -- Why the outbox exists:
 --
@@ -31,7 +29,7 @@ CREATE TABLE outbox_messages (
     topic        TEXT        NOT NULL,
 
     -- Marshalled event payload (typically JSON). Store the bytes the
-    -- broker will receive, not a Go struct — keep marshalling out of
+    -- broker will receive, not a Go struct - keep marshalling out of
     -- the forwarder so it is policy-free.
     payload      BYTEA       NOT NULL,
 
@@ -65,4 +63,4 @@ CREATE INDEX outbox_messages_pending_idx
 -- Optional: an aggregate_id column + index if you need per-aggregate
 -- ordering at the broker (Kafka partition key, Watermill ordering
 -- key). Add it if you have an ordering requirement; do not add it
--- "just in case" — it makes the forwarder more complex.
+-- "just in case" - it makes the forwarder more complex.

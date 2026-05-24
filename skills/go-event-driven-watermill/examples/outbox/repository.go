@@ -1,7 +1,7 @@
-// Package outbox shows the repository side of the article's
-// version-3 (outbox) UsePointsAsDiscount flow. The handler — which
-// supplies a closure returning ([]any) of events — lives in the
-// parent directory (handler_returns_events.go).
+// Package outbox shows the repository side of the recommended
+// outbox flow. The handler supplies a closure returning ([]any) of
+// events; the repository stores those events in the same transaction
+// as the aggregate update.
 //
 // What this file demonstrates:
 //
@@ -10,13 +10,10 @@
 //
 //   - The repository inserts each returned event into the outbox
 //     table inside the SAME transaction as the users/user_discounts
-//     UPDATEs. The article uses Watermill's SQL Pub/Sub for this
-//     (see "Repository Publishing Logic" snippet from the post);
-//     this file shows the underlying mechanism with plain INSERTs
-//     so the pattern is visible without depending on Watermill's
-//     internal table layout.
+//     UPDATEs. Watermill SQL Pub/Sub can provide this table-backed
+//     publish step; this file keeps the INSERT visible.
 //
-// Reading order: parent's handler_returns_events.go → this file →
+// Reading order: parent's handler_returns_events.go -> this file ->
 // forwarder.go.
 package outbox
 
@@ -30,9 +27,9 @@ import (
 	"github.com/google/uuid"
 )
 
-// User / Discounts mirror the article's aggregate. Duplicated in this
-// example folder so each file can be read standalone; in a real
-// project they would come from one domain package.
+// User / Discounts are duplicated in this example folder so the file
+// can be read standalone; in a real project they would come from one
+// domain package.
 type User struct {
 	id        int
 	email     string
@@ -67,9 +64,8 @@ func unmarshalUser(id int, email string, points int, d *Discounts) *User {
 
 func unmarshalDiscounts(n int) *Discounts { return &Discounts{nextOrderDiscount: n} }
 
-// PostgresUserRepository is the outbox-aware variant of the article's
-// repository. The only structural change vs. the plain version is
-// the closure signature and the loop that inserts events.
+// PostgresUserRepository is the outbox-aware repository. The closure
+// returns events and the repository inserts them before committing.
 type PostgresUserRepository struct {
 	db *sql.DB
 }
@@ -79,7 +75,7 @@ func NewPostgresUserRepository(db *sql.DB) *PostgresUserRepository {
 }
 
 // UpdateByID is the outbox version. Compare to the plain UpdateByID
-// in the persistence skill (examples/update_fn.go) — the only
+// in the persistence skill (examples/update_fn.go) - the only
 // differences are:
 //
 //   - The closure returns (updated bool, events []any, err error).
@@ -135,11 +131,8 @@ func (r *PostgresUserRepository) UpdateByID(
 			return err
 		}
 
-		// Insert events into the outbox. The article wraps this as
-		// `eventBus, err := NewWatermillEventBus(tx); eventBus.Publish(...)`
-		// — same idea, different surface. The point is that the
-		// "publish" lands as INSERTs against tx, not as a network
-		// call to the broker.
+		// Insert events into the outbox. The publish operation lands
+		// as INSERTs against tx, not as a network call to the broker.
 		for _, event := range events {
 			if err := insertOutbox(ctx, tx, event); err != nil {
 				return err
@@ -150,7 +143,7 @@ func (r *PostgresUserRepository) UpdateByID(
 }
 
 // insertOutbox writes one event row. Topic is derived from the Go
-// type name (`PointsUsedForDiscount`) so the producer never has to
+// type name (`PointsUsed`) so the producer never has to
 // hand-spell topic strings; if you prefer explicit topics, accept
 // them on the function and have the aggregate return them alongside
 // each event.
@@ -181,7 +174,7 @@ func topicOf(event any) string {
 	return "events"
 }
 
-// runInTx is the same minimal helper from the article.
+// runInTx is the minimal transaction helper used by the repository.
 func runInTx(db *sql.DB, fn func(tx *sql.Tx) error) error {
 	tx, err := db.Begin()
 	if err != nil {

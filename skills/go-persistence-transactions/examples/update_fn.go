@@ -1,5 +1,4 @@
-// update_fn.go is the centerpiece pattern from the article: the
-// UpdateFn-style repository method.
+// update_fn.go demonstrates the UpdateFn-style repository method.
 //
 // The contract: the caller supplies a closure that receives a fully
 // loaded aggregate and returns (updated bool, err error).
@@ -10,7 +9,7 @@
 //     the aggregate back to rows, and COMMIT/ROLLBACK.
 //   - The bool tells the repo whether anything actually changed.
 //     If the closure returns (false, nil), we skip the UPDATE
-//     statements entirely — a cheap optimization and a clean signal
+//     statements entirely - a cheap optimization and a clean signal
 //     for "no-op" cases.
 //
 // Why this beats handler-owned transactions: the *sql.Tx never
@@ -25,8 +24,8 @@ import (
 	"errors"
 )
 
-// User is the aggregate from the article. It groups two tables —
-// users and user_discounts — under one consistency boundary because
+// User is the aggregate. It groups two tables - users and
+// user_discounts - under one consistency boundary because
 // "use points to add a discount" must be atomic across both.
 //
 // Notice the field naming: all lowercase, no struct tags, no
@@ -47,16 +46,15 @@ func (u *User) Discounts() *Discounts { return u.discounts }
 
 // Discounts is the second half of the User aggregate. It lives in
 // its own struct (and its own table) but cannot be loaded or saved
-// independently of User — that is what makes them one aggregate.
+// independently of User - that is what makes them one aggregate.
 type Discounts struct {
 	nextOrderDiscount int
 }
 
 func (c *Discounts) NextOrderDiscount() int { return c.nextOrderDiscount }
 
-// UsePointsAsDiscount is the only domain method shown in the
-// article. It enforces all of the rules — input validity, balance
-// check, balanced double-entry-style update — and either fully
+// UsePointsAsDiscount enforces all of the rules - input validity,
+// balance check, balanced double-entry-style update - and either fully
 // succeeds or returns an error without touching state.
 //
 // The repository never reaches inside this method; it just calls it.
@@ -90,9 +88,8 @@ func UnmarshalDiscounts(nextOrderDiscount int) *Discounts {
 }
 
 // UserRepository is the application-facing interface. UpdateByID is
-// the only method the article exposes — that constraint is itself a
-// design statement: every mutation goes through load → mutate → save
-// under one transaction.
+// the narrow method the application needs. Every mutation goes
+// through load -> mutate -> save under one transaction.
 type UserRepository interface {
 	UpdateByID(ctx context.Context, userID int, updateFn func(user *User) (bool, error)) error
 }
@@ -108,8 +105,7 @@ func NewPostgresUserRepository(db *sql.DB) *PostgresUserRepository {
 	return &PostgresUserRepository{db: db}
 }
 
-// UpdateByID is the body shown in the article. Each step is worth
-// reading once:
+// UpdateByID shows the full repository-owned transaction body:
 //
 //   - Two SELECT ... FOR UPDATE statements, one per row. Both are
 //     locked for the duration of the tx, so two concurrent
@@ -119,7 +115,7 @@ func NewPostgresUserRepository(db *sql.DB) *PostgresUserRepository {
 //     caller's closure runs against the in-memory User.
 //
 //   - If the closure says updated == false, we skip the UPDATEs.
-//     This handles "the command was a no-op" cleanly — e.g. a
+//     This handles "the command was a no-op" cleanly - for example, a
 //     handler that decided no change was needed.
 //
 //   - Two UPDATE statements write the aggregate back. The tx commits
@@ -177,19 +173,18 @@ func (r *PostgresUserRepository) UpdateByID(
 }
 
 // UsePointsAsDiscount is the command. Commands are dumb data
-// carriers — no logic, no validation beyond shape — because the
+// carriers - no logic, no validation beyond shape - because the
 // rules belong on the aggregate.
 type UsePointsAsDiscount struct {
 	UserID int
 	Points int
 }
 
-// UsePointsAsDiscountHandler is the article's clean handler. Compare
-// the body to the no-transaction version (which had GetPoints +
-// TakePoints + AddDiscount as three independent calls, any of which
-// could fail mid-way leaving inconsistent state): this version is
-// one call, the consistency boundary is in the repository, and the
-// caller cannot get it wrong.
+// UsePointsAsDiscountHandler is the clean handler shape: one call,
+// with the consistency boundary in the repository. It avoids the
+// handler-level anti-pattern of independent GetPoints, TakePoints,
+// and AddDiscount calls that can fail midway and leave inconsistent
+// state.
 type UsePointsAsDiscountHandler struct {
 	userRepository UserRepository
 }

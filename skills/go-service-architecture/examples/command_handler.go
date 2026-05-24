@@ -1,10 +1,5 @@
-// Package examples mirrors the Training/Trainer domain from the
-// Three Dots Labs Wild Workouts posts.
-//
-// command_handler.go shows the one-handler-per-command shape from
-// the "Basic CQRS in Go" post. The "Introducing Clean Architecture"
-// post uses a multi-method TrainingService instead; both are shown
-// in the articles, but this file is the CQRS-shaped variant.
+// Package examples demonstrates a Training/Trainer command handler
+// using the one-handler-per-command shape.
 //
 //   - One handler struct per command.
 //   - Dependencies are narrow interfaces, named for what the
@@ -19,7 +14,7 @@
 // interfaces in *this* package. The adapter that calls a real gRPC
 // service implements trainerService; the adapter that talks to
 // Firestore implements trainingRepository. Neither is imported
-// here — they only have to satisfy the local interface.
+// here - they only have to satisfy the local interface.
 package examples
 
 import (
@@ -28,7 +23,7 @@ import (
 	"time"
 )
 
-// ── The command ──────────────────────────────────────────────────
+// The command
 //
 // Commands are flat data structures. No methods, no validation
 // beyond shape. The handler is responsible for invoking domain
@@ -48,11 +43,11 @@ type AuthUser struct {
 	Role string // "trainer" or "attendee"
 }
 
-// ── The ports the handler depends on ──────────────────────────────
+// The ports the handler depends on
 //
 // Three narrow interfaces, each describing exactly what THIS
 // handler needs. trainerService and userService are likely also
-// used by other handlers — they live alongside this file because
+// used by other handlers - they live alongside this file because
 // this package is where they're consumed, but in a larger codebase
 // they would each live in the file of the use case that
 // established them.
@@ -80,8 +75,8 @@ type trainerService interface {
 
 // Training is the application-layer view of the aggregate. (In a
 // strict DDD layout this would be in a domain package and the app
-// layer would import it; in the Wild Workouts article the model
-// lives in app/.)
+// layer would import it; some app-layer layouts keep the model next
+// to the handlers.)
 type Training struct {
 	UUID     string
 	UserUUID string
@@ -92,7 +87,7 @@ func (t Training) CanBeCancelled() bool {
 	return t.Time.Sub(time.Now()) > 24*time.Hour
 }
 
-// ── The handler ──────────────────────────────────────────────────
+// The handler
 
 type CancelTrainingHandler struct {
 	repo           trainingRepository
@@ -100,11 +95,11 @@ type CancelTrainingHandler struct {
 	trainerService trainerService
 }
 
-// NewCancelTrainingHandler panics on nil dependencies. This is the
-// Wild Workouts style: a missing dependency at startup is a wiring
-// bug, and a startup panic with a clear message is better than a
-// nil-pointer deref later under load. Use this for constructors
-// called by main.go; do not panic in business code.
+// NewCancelTrainingHandler panics on nil dependencies. A missing
+// dependency at startup is a wiring bug, and a startup panic with a
+// clear message is better than a nil-pointer deref later under load.
+// Use this for constructors called by main.go; do not panic in
+// business code.
 func NewCancelTrainingHandler(
 	repo trainingRepository,
 	userService userService,
@@ -149,7 +144,7 @@ func (h CancelTrainingHandler) Handle(ctx context.Context, cmd CancelTraining) e
 
 		// Refund policy. The "right" amount depends on who's
 		// cancelling and how close to the start. Notice this is
-		// readable as business intent — not buried in a SQL CASE.
+		// readable as business intent - not buried in a SQL CASE.
 		var balanceDelta int
 		switch {
 		case training.CanBeCancelled():

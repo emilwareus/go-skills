@@ -1,48 +1,58 @@
 ---
 name: go-domain-modeling
-description: Model Go business rules with DDD-Lite — entities with unexported fields, state-transition methods, sentinel errors. Use for refactoring anemic CRUD handlers into aggregates whose methods cannot leave the aggregate in an invalid state.
+description: Model Go business rules with aggregates, unexported fields, business-named state-transition methods, and sentinel errors. Use for refactoring procedural handlers into domain types whose methods keep state valid.
 ---
 
 # Go Domain Modeling
 
-Scope: the "DDD-Lite" patterns from Three Dots Labs' [Introduction to DDD Lite](https://threedots.tech/post/ddd-lite-in-go-introduction/) — refactoring procedural handler code into an aggregate that owns its invariants. No coupling to the wider DDD vocabulary (bounded contexts, ubiquitous language, event sourcing) beyond what that article uses.
+Use this when a change adds or moves business rules. Put state-transition rules on domain types, keep domain state private, and make handlers call business-named methods. Keep the skill focused on the model you should build and the traps to catch during refactors.
 
-## The refactor this skill is about
+## Aggregate Pattern
 
-The article opens with a procedural handler:
+Use aggregates for state that must stay consistent together. The aggregate should make illegal state changes hard to express:
 
 ```go
-func (h ScheduleTrainingHandler) Handle(ctx context.Context, hour time.Time) error {
-    if hour.Before(time.Now()) { return errors.New("cannot schedule in the past") }
-    // ... more guards ...
-    return h.repo.Update(ctx, hour, func(h *Hour) (*Hour, error) {
-        if h.Availability != "available" { return nil, errors.New("hour not available") }
-        h.Availability = "training_scheduled"
-        return h, nil
-    })
+type Hour struct {
+    hour         time.Time
+    availability Availability
+}
+
+func (h *Hour) ScheduleTraining() error {
+    if !h.IsAvailable() {
+        return ErrHourNotAvailable
+    }
+    h.availability = TrainingScheduled
+    return nil
 }
 ```
 
-…and moves every state-transition rule onto the `Hour` aggregate so the handler shrinks to one method call. This skill is about doing that refactor.
+Apply these rules:
 
-## Aggregate rules
+- Fields are unexported.
+- State changes happen through methods named after business actions.
+- Each state-transition method checks the current state before mutating.
+- Read methods such as `IsAvailable` and `HasTrainingScheduled` are side-effect free.
+- Stable transition failures use package-level sentinel errors.
+- The handler calls one business method instead of repeating guard logic.
 
-- Unexported fields. No path to mutation that bypasses methods.
-- One method per business state transition, named for the business action (`ScheduleTraining`, `CancelTraining`, `MakeAvailable`).
-- Each transition method validates that the transition is currently legal and returns a sentinel error if not.
-- Queries (`IsAvailable`, `HasTrainingScheduled`) are read-only and side-effect free.
-- Sentinel errors are package-level `var`s declared once (`ErrHourNotAvailable`), compared with `errors.Is`.
+## Constructors
 
-## Constructor rules
+Use named constructors for valid initial states:
 
-- Named constructors per initial state (`NewAvailableHour`, `NewNotAvailableHour`) — not one constructor with an `Availability` parameter the caller has to remember the meaning of.
-- All validation lives inside the constructor. A returned `*Hour` is always safe to use.
+```go
+func NewAvailableHour(hour time.Time) (*Hour, error) {
+    if err := validateTime(hour); err != nil {
+        return nil, err
+    }
+    return &Hour{hour: hour, availability: Available}, nil
+}
+```
 
-## Aggregate boundaries
+Keep validation inside constructors. A returned aggregate should be ready to use without a separate validation step. Use rehydration constructors only for persistence boundaries, and keep them clearly named so callers understand they rebuild stored state rather than create new business state.
 
-Group data that must be transactionally consistent into one aggregate. If `Hour` and `Availability` must be updated together under one lock, they belong to the same aggregate — even if they live in different database tables.
+## Repository Boundary
 
-The repository for an aggregate exposes an `UpdateFn`-style method:
+Persist aggregates through repository methods that load, mutate, and save one consistency boundary:
 
 ```go
 type Repository interface {
@@ -50,22 +60,33 @@ type Repository interface {
 }
 ```
 
-The repository owns transactions and locks; the closure makes domain decisions. See the [`go-persistence-transactions`](../go-persistence-transactions/SKILL.md) skill for the persistence side.
+The repository owns transactions and locks. The closure owns domain decisions. Group data into one aggregate when it must be updated under one consistency boundary, even if the database stores it in several tables.
 
-## Anti-patterns
+## Package Boundary
 
-- Public fields on aggregates ("anemic model"). The rule about *when* you can transition becomes the responsibility of every caller.
-- Constructors that accept invalid state and rely on a separate `Validate()` call.
-- State transitions implemented as `SetAvailability(string)` rather than `ScheduleTraining()`. The setter is a wrong-shaped API: it lets a caller pass `"training_scheduled"` without checking the current state.
-- Domain code that imports `net/http`, `database/sql`, `gorm`, `gin`, broker clients, cloud SDKs, or telemetry vendors.
-- Returning ORM models or DTOs from domain methods.
+Keep domain packages focused on business behavior:
+
+- Domain code imports standard value packages such as `time` and `errors`.
+- Transport, SQL, ORM, broker, cloud, filesystem, and telemetry dependencies stay outside the domain package.
+- Domain methods return domain values and domain errors, not DTOs or ORM models.
+
+## Anti-Patterns
+
+- Public aggregate fields that let handlers or adapters bypass business methods.
+- Setter-shaped APIs such as `SetAvailability(string)` when the real operation is `ScheduleTraining`, `CancelTraining`, or `MakeAvailable`.
+- Constructors that return invalid values and require a later `Validate()` call.
+- Validation only at the HTTP or CLI boundary while internal callers can still create invalid state.
+- Repeated guard logic in handlers, repositories, or transports instead of one aggregate method.
+- Domain packages importing frameworks, SQL clients, ORM models, broker clients, cloud SDKs, or telemetry vendors.
+- Returning DTOs, ORM models, or transport response shapes from domain behavior.
 
 ## Examples
 
-- [`examples/hour_aggregate.go`](examples/hour_aggregate.go) — the `Hour` aggregate from the DDD Lite article: unexported `hour`/`availability` fields, named constructors, `ScheduleTraining`/`CancelTraining`/`MakeAvailable` transition methods, sentinel errors, `IsAvailable`/`HasTrainingScheduled` queries.
+- [`examples/hour_aggregate.go`](examples/hour_aggregate.go) - `Hour` aggregate with unexported fields, named constructors, `ScheduleTraining`/`CancelTraining`/`MakeAvailable` transition methods, sentinel errors, and read-only query methods.
 
-## Done criteria
+## Done Criteria
 
-- The handler that motivated the change is one method call into an aggregate method.
-- Every state transition rule lives on the aggregate, not in the handler.
-- The aggregate's tests run without a database, broker, or framework.
+- Business state changes are expressed as aggregate methods.
+- Handlers call aggregate methods instead of editing fields directly.
+- Constructors return valid aggregate instances.
+- Domain tests run without a database, broker, or framework.

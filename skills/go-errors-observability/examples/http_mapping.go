@@ -1,4 +1,4 @@
-// http_mapping.go mirrors the Wild Workouts httperr helper shape:
+// http_mapping.go shows a Wild Workouts-style httperr helper shape:
 // ports call small helpers such as Unauthorised, BadRequest,
 // InternalError, or RespondWithSlugError instead of spreading
 // status-code decisions across handlers.

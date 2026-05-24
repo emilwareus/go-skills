@@ -1,12 +1,9 @@
 // forwarder.go is the second half of the outbox pattern: a background
 // loop that drains outbox_messages into the broker.
 //
-// Relationship to the article: the Three Dots Labs post wires the
-// outbox via Watermill's SQL Pub/Sub plus the Watermill Forwarder
-// component, which does this job for you out of the box. This file
-// shows a hand-rolled equivalent so the mechanism is visible.
-// Reach for Watermill's components in real code; read this file to
-// understand what they're doing under the hood.
+// Watermill SQL Pub/Sub plus Watermill Forwarder can provide this
+// component out of the box. This file shows the same mechanics with
+// explicit SQL so the guarantees are visible.
 //
 // What the forwarder guarantees:
 //
@@ -44,7 +41,7 @@ import (
 const (
 	batchSize     = 100
 	pollInterval  = 500 * time.Millisecond
-	maxAttempts   = 10           // after this many failures, leave the row for an operator
+	maxAttempts   = 10 // after this many failures, leave the row for an operator
 	backoffOnFail = 5 * time.Second
 )
 
@@ -79,7 +76,7 @@ func (f *Forwarder) Run(ctx context.Context) error {
 		case <-ticker.C:
 			if err := f.drainOnce(ctx); err != nil {
 				f.logger.Error("outbox drain failed", err, nil)
-				// Don't return — keep polling. Transient DB or broker
+				// Don't return - keep polling. Transient DB or broker
 				// errors are exactly what this loop exists to ride out.
 			}
 		}
@@ -92,12 +89,12 @@ func (f *Forwarder) Run(ctx context.Context) error {
 //
 //   - SELECT ... FOR UPDATE SKIP LOCKED grabs only rows no other
 //     forwarder is working on. This is what lets you scale by simply
-//     running more forwarder replicas — they will not double-publish
+//     running more forwarder replicas - they will not double-publish
 //     the same row.
 //
 //   - The entire publish + mark-as-published cycle happens inside one
 //     transaction. If publishing succeeds but committing fails, we
-//     will redeliver — that's why consumers must dedup. If publishing
+//     will redeliver - that's why consumers must dedup. If publishing
 //     fails, we increment attempts and roll back; the row stays
 //     visible for the next poll.
 func (f *Forwarder) drainOnce(ctx context.Context) error {
@@ -155,7 +152,7 @@ func (f *Forwarder) drainOnce(ctx context.Context) error {
 			// Record the failure and let the next tick retry. Note
 			// we update *within* the same transaction; if commit
 			// fails too, the attempt counter rolls back, which is
-			// actually fine — we'll try again.
+			// actually fine - we'll try again.
 			if _, err := tx.ExecContext(ctx, `
 				UPDATE outbox_messages
 				SET attempts = attempts + 1, last_error = $1

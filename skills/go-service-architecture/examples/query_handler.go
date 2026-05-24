@@ -1,6 +1,4 @@
-// query_handler.go is the read-side counterpart to
-// command_handler.go, mirroring the AvailableHoursHandler from the
-// Three Dots Labs "Basic CQRS in Go" post.
+// query_handler.go is the read-side counterpart to command_handler.go.
 //
 // What CQRS buys you here:
 //
@@ -12,7 +10,7 @@
 //   - Different ports. The query handler depends on
 //     AvailableHoursReadModel, which lives in this package. The
 //     adapter that implements it can be a separate database, a
-//     denormalized table, a cache, or a search index — it doesn't
+//     denormalized table, a cache, or a search index - it doesn't
 //     have to be the same store the write side uses.
 //
 //   - Different change pressure. Read shapes evolve as the UI
@@ -32,7 +30,7 @@ import (
 	"time"
 )
 
-// ── The query ────────────────────────────────────────────────────
+// The query
 //
 // Queries are inputs only. Like commands, they're flat data. The
 // handler decides what shape to return.
@@ -42,7 +40,7 @@ type AvailableHours struct {
 }
 
 // Date is the read DTO returned to the caller. Notice it has
-// public fields and JSON tags — it's optimized for serialization
+// public fields and JSON tags - it's optimized for serialization
 // to the UI, not for enforcing invariants. That's the opposite of
 // the Hour aggregate from the domain-modeling skill, and that's
 // the whole point of CQRS: writes and reads optimize for different
@@ -57,17 +55,17 @@ type Hour struct {
 	Available bool      `json:"available"`
 }
 
-// ── The port ─────────────────────────────────────────────────────
+// The port
 //
 // One interface, one method, scoped exactly to what the handler
 // needs. The adapter implementing this is free to use whatever
-// query strategy fits — a single SELECT, a join across two tables,
+// query strategy fits - a single SELECT, a join across two tables,
 // a call to a search service. The handler does not care.
 type AvailableHoursReadModel interface {
 	AvailableHours(ctx context.Context, from, to time.Time) ([]Date, error)
 }
 
-// ── The handler ──────────────────────────────────────────────────
+// The handler
 
 type AvailableHoursHandler struct {
 	readModel AvailableHoursReadModel
@@ -81,7 +79,7 @@ func NewAvailableHoursHandler(readModel AvailableHoursReadModel) AvailableHoursH
 }
 
 // Handle validates the query shape, then delegates to the read
-// model. Notice we DO validate here — "from after to" is a query
+// model. Notice we DO validate here - "from after to" is a query
 // error, and rejecting it before the database call is cheaper and
 // easier to test than rejecting it via a SQL constraint.
 //
