@@ -117,6 +117,26 @@ Keep mapping explicit:
 - Include tenant, organization, or owner constraints in repository queries.
 - Expose database IDs or nullable fields in domain APIs only when they are business concepts.
 
+## Secure Repository Methods
+
+Put visibility-sensitive checks where they cannot be skipped accidentally:
+
+- Model who can see or mutate an aggregate as domain logic.
+- Pass the authenticated/domain user into repository methods that load protected data.
+- Run the visibility check immediately after rehydration and before returning the aggregate or running `updateFn`.
+- Keep tenant, owner, organization, and soft-delete filters inside repository queries when they are part of data access.
+- Test "same ID, wrong user/tenant" paths against the repository, not only at the HTTP handler.
+
+For update methods, the repository should load the aggregate, check access, then call the callback:
+
+```go
+type TrainingRepository interface {
+    UpdateTraining(ctx context.Context, id string, user TrainingUser, updateFn func(*Training) error) error
+}
+```
+
+This does not move all authorization into persistence. The business rule still belongs in domain code. The repository makes the rule hard to bypass for reads and updates that expose protected data.
+
 ## Migrations
 
 For schema changes:
@@ -133,6 +153,7 @@ Use real database tests for:
 
 - Query shape and row mapping.
 - Tenant isolation.
+- Owner/visibility checks on both read and update repository methods.
 - Unique constraints and duplicate handling.
 - Transactions, locks, and optimistic versions.
 - Soft deletes and authorization-sensitive filters.
@@ -144,6 +165,7 @@ Repository tests should prove persistence behavior against the real database eng
 
 - [`examples/transactor.go`](examples/transactor.go) - `runInTx`, transaction-bound adapters, and `TransactionProvider`.
 - [`examples/update_fn.go`](examples/update_fn.go) - `UpdateByID(ctx, userID, func(*User) (bool, error))` with row locks and two-table aggregate persistence.
+- [`examples/repository_security.go`](examples/repository_security.go) - repository read/update methods that require a domain user and call `CanUserSeeTraining` after rehydration.
 
 ## Done Criteria
 

@@ -30,16 +30,52 @@ npx skills add emilwareus/go-skills --global
 
 | Skill | Use when |
 | --- | --- |
+| `go-strategic-ddd` | Decide bounded contexts, context integration, ubiquitous language, and service/module splits. |
 | `go-domain-modeling` | Move business state-transition rules into aggregates. |
 | `go-service-architecture` | Place code in ports, app, domain, adapters, and composition packages. |
+| `go-code-quality-patterns` | Apply deliberate duplication, safe enums, value objects, decorators, and low-coupling library choices. |
 | `go-persistence-transactions` | Design repository-owned transactions, locking, and UpdateFn flows. |
-| `go-testing` | Choose unit, application, adapter, component, integration, and event-driven test scopes. |
-| `go-errors-observability` | Classify wrapped errors and map stable slug errors at boundaries. |
 | `go-event-driven-watermill` | Build Watermill-style event flows and outbox/forwarder patterns. |
+| `go-testing` | Choose unit, application, adapter, component, integration, and event-driven test scopes. |
+| `go-service-platform` | Keep local dev, generated API contracts, auth, Terraform, Cloud Run-style deployment, and CI wiring at the edge. |
+| `go-errors-observability` | Classify wrapped errors and map stable slug errors at boundaries. |
+
+## Coverage
+
+The skills are organized by engineering decision, not by source chronology:
+
+| Area | Skills |
+| --- | --- |
+| Strategic DDD and context boundaries | `go-strategic-ddd`, `go-service-architecture` |
+| Tactical DDD and aggregates | `go-domain-modeling`, `go-persistence-transactions` |
+| Repository pattern and transactions | `go-persistence-transactions`, `go-testing` |
+| CQRS and Clean Architecture | `go-service-architecture`, `go-testing` |
+| Event-driven and distributed consistency | `go-event-driven-watermill`, `go-persistence-transactions` |
+| Testing architecture and CI harnesses | `go-testing`, `go-service-platform` |
+| Delivery platform and generated contracts | `go-service-platform`, `go-service-architecture` |
+| Go code quality patterns | `go-code-quality-patterns`, `go-errors-observability` |
 
 ## Core Concepts
 
 Each skill teaches reusable Go patterns. The reference links show where many of the patterns came from, but the skills themselves are written as operating guidance rather than article summaries.
+
+### `go-strategic-ddd`
+
+**Core concepts**
+
+- Reconstruct business flows from domain events, commands, actors, policies, read models, aggregates, and pivotal events.
+- Bounded contexts own one model and one vocabulary; deployment as monolith or microservices comes later.
+- Cross-context communication uses direct ports, public APIs, domain events, shared kernels, or anti-corruption adapters intentionally.
+- Context splits should be explained through business capability and consistency needs, not tables or endpoints.
+
+**References**
+
+- [DDD Knowledge Index](https://academy.threedots.tech/knowledge/ddd/)
+- [Strategic Domain Design Knowledge Index](https://academy.threedots.tech/knowledge/strategic-domain-design/)
+- [Software Dark Ages](https://threedots.tech/post/software-dark-ages/)
+- [When using Microservices or Modular Monolith in Go can be just a detail?](https://threedots.tech/post/microservices-or-monolith-its-detail/)
+- [When to avoid DRY in Go](https://threedots.tech/post/things-to-know-about-dry/)
+- [Combining DDD, CQRS, and Clean Architecture in Go](https://threedots.tech/post/ddd-cqrs-clean-architecture-combined/)
 
 ### `go-domain-modeling`
 
@@ -79,6 +115,26 @@ Each skill teaches reusable Go patterns. The reference links show where many of 
 - [The Over-Engineering Pendulum](https://threedots.tech/post/the-over-engineering-pendulum/)
 - [Software Dark Ages](https://threedots.tech/post/software-dark-ages/)
 
+### `go-code-quality-patterns`
+
+**Core concepts**
+
+- Duplicate data shapes when API responses, database models, event payloads, generated types, and domain objects change for different reasons.
+- Use constructors, private fields, and safe enums to keep important business values valid in memory.
+- Use decorators for authorization, logging, metrics, tracing, and retry behavior around command/query handlers.
+- Prefer small composable libraries over frameworks that force domain/application code to follow framework conventions.
+- Add abstractions only when they remove real coupling, improve tests, or clarify business rules.
+
+**References**
+
+- [When to avoid DRY in Go](https://threedots.tech/post/things-to-know-about-dry/)
+- [Safer Enums in Go](https://threedots.tech/post/safer-enums-in-go/)
+- [Increasing Cohesion in Go with Generic Decorators](https://threedots.tech/post/increasing-cohesion-in-go-with-generic-decorators/)
+- [Common Anti-Patterns in Go Web Applications](https://threedots.tech/post/common-anti-patterns-in-go-web-applications/)
+- [The Best Go framework: no framework?](https://threedots.tech/post/best-go-framework/)
+- [The Go libraries that never failed us](https://threedots.tech/post/list-of-recommended-libraries/)
+- [The Over-Engineering Pendulum](https://threedots.tech/post/the-over-engineering-pendulum/)
+
 ### `go-persistence-transactions`
 
 **Core concepts**
@@ -86,6 +142,7 @@ Each skill teaches reusable Go patterns. The reference links show where many of 
 - `runInTx` helper owning BEGIN/COMMIT/ROLLBACK so business code never holds a `*sql.Tx`.
 - `UpdateFn` repository pattern (`UpdateByID(ctx, id, func(*User) (bool, error))`) - load -> mutate -> save under one tx, with `SELECT ... FOR UPDATE` for short critical sections.
 - `TransactionProvider` + `Adapters` fallback for the case where multiple repositories must commit together; every cross-repo read that relies on locks must remember `FOR UPDATE`.
+- Secure-by-design repositories pass the domain user into protected reads/updates and call domain visibility checks after rehydration.
 - Anti-patterns to catch: `*sql.Tx` in method signatures, one-repo-per-table thinking, and handler-orchestrated `GetX`/`TakeX`/`AddY` splits.
 
 **References**
@@ -100,15 +157,19 @@ Each skill teaches reusable Go patterns. The reference links show where many of 
 
 - Events as past-tense facts from the publishing domain; never name an event after a downstream service's action.
 - Application boundary: business rules live in command/query handlers; Watermill callbacks translate messages into commands and stop.
+- Distributed consistency decision: when the business accepts waiting, publish events and retry internally instead of forcing distributed transactions.
+- Watermill CQRS `EventBus` / `EventProcessor` setup stays in adapters/composition; typed handlers map events to commands.
 - Outbox pattern with Watermill SQL Pub/Sub + Forwarder; this repo's `examples/outbox/*` files are hand-rolled illustrations of the same mechanism.
 - The `UpdateByID` outbox variant: closure returns `(bool, []any, error)` so the aggregate decides which events occurred and the repo persists them in the same tx.
-- At-least-once delivery is the default contract; consumers must make side effects idempotent.
+- Durable execution: persist validated input, acknowledge after durable side effects, keep handler state changes atomic, and prove idempotency with duplicate-message tests.
+- At-least-once delivery is the default contract; consumers must expose poison/dead-letter handling when messages fail repeatedly.
 
 **References**
 
 - [Distributed Transactions in Go: Read Before You Try](https://threedots.tech/post/distributed-transactions-in-go/)
 - [Introducing Watermill - Go event-driven applications library](https://threedots.tech/post/introducing-watermill/)
 - [Using MySQL as a Pub/Sub](https://threedots.tech/post/when-sql-database-makes-great-pub-sub/)
+- [Durable Background Execution with Go and SQLite](https://threedots.tech/post/sqlite-durable-execution/)
 - [Watermill 1.5 / 1.4 release notes](https://threedots.tech/post/watermill-1-5/)
 
 ### `go-testing`
@@ -121,12 +182,33 @@ Each skill teaches reusable Go patterns. The reference links show where many of 
 - Real-database integration tests for SQL constraints, locking, isolation, and migration compatibility, using a docker-compose-style local harness or the repo's equivalent.
 - Bounded eventual assertions (`assert.EventuallyWithT`) for event-driven flows; per-test correlation IDs to filter parallel tests.
 - Deliberate parallelism: `vgt`, `paralleltest`, `-parallel` vs `-p`, unique IDs, and avoiding `t.Parallel()` on fast unit tests.
+- Docker Compose CI pattern: reuse local topology, add CI overrides, test built images, then deploy.
 
 **References**
 
 - [4 practical principles of high-quality database integration tests in Go](https://threedots.tech/post/database-integration-testing/)
 - [Optimising and Visualising Go Tests Parallelism](https://threedots.tech/post/go-test-parallelism/)
 - [Microservices test architecture. Can you sleep well without end-to-end tests?](https://threedots.tech/post/microservices-test-architecture/)
+- [Running integration tests with docker-compose in Google Cloud Build](https://threedots.tech/post/running-integration-tests-on-google-cloud-build/)
+
+### `go-service-platform`
+
+**Core concepts**
+
+- Local development should run the service graph with Docker Compose and keep hot reload as a development-only concern.
+- HTTP ports use small routers, standard middleware, and generated OpenAPI server interfaces; handlers call application commands/queries.
+- gRPC ports use `.proto` contracts and generated server/client code; generated types are translated at the boundary.
+- Auth provider details stay at the edge: middleware verifies tokens and produces a small authenticated user value for application code.
+- Terraform/CI changes are reviewed as code; CI should test the images or service graph that will be deployed.
+
+**References**
+
+- [Building a serverless application with Go, Google Cloud Run and Firebase](https://threedots.tech/post/serverless-cloud-run-firebase-modern-go-application/)
+- [A complete Terraform setup of a serverless application on Google Cloud Run and Firebase](https://threedots.tech/post/complete-setup-of-serverless-application/)
+- [Robust gRPC communication on Google Cloud Run](https://threedots.tech/post/robust-grpc-google-cloud-run/)
+- [You should not build your own authentication](https://threedots.tech/post/firebase-cloud-run-authentication/)
+- [Running integration tests with docker-compose in Google Cloud Build](https://threedots.tech/post/running-integration-tests-on-google-cloud-build/)
+- [Creating local Go dev environment with Docker and live code reloading](https://threedots.tech/post/go-docker-dev-environment-with-go-modules-and-live-code-reloading/)
 
 ### `go-errors-observability`
 
@@ -147,24 +229,31 @@ This skill is authored synthesis. Its examples use Wild Workouts' slug-error and
 
 ```text
 skills/                      # everything under here ships via `npx skills add`
+  go-strategic-ddd/
+    SKILL.md
   go-domain-modeling/
     SKILL.md
     examples/                # annotated reference code (compiled, see Development)
   go-service-architecture/
     SKILL.md
     examples/
-  go-persistence-transactions/
+  go-code-quality-patterns/
     SKILL.md
     examples/
-  go-testing/
-    SKILL.md                 # prose only; worked test files live in /tests
-  go-errors-observability/
+  go-persistence-transactions/
     SKILL.md
     examples/
   go-event-driven-watermill/
     SKILL.md
     examples/
       outbox/                # separate package for the outbox-specific reference impl
+  go-testing/
+    SKILL.md                 # prose only; worked test files live in /tests
+  go-service-platform/
+    SKILL.md
+  go-errors-observability/
+    SKILL.md
+    examples/
 tests/                       # not shipped; repo-only worked tests demonstrating go-testing patterns
   aggregate/
   handler/

@@ -28,6 +28,22 @@ Event payloads should include the IDs and metadata consumers need:
 - Correlation or causation ID.
 - Additive fields or explicit versions for schema evolution.
 
+Use messages for transport concerns and events for domain facts. A Watermill message carries UUID, metadata, payload, context, and Ack/Nack state. The event is the decoded payload your application understands.
+
+## Distributed Consistency
+
+Use events when a workflow crosses service boundaries and immediate consistency is not required by the business. This is not accepting inconsistency permanently; it is accepting that consistency may arrive after the publisher commits.
+
+Before adding a distributed transaction, check:
+
+- Are the service boundaries wrong?
+- Can the workflow be owned by one aggregate or one service instead?
+- Can the downstream effect be retried from an event?
+- Can the user see a pending state while the system catches up?
+- Does the business accept a delay for this specific operation?
+
+When the answer is yes, publish an event from the local transaction and let the downstream service react asynchronously. When the answer is no, keep the operation inside one consistency boundary or redesign the split.
+
 ## Watermill Basics
 
 Keep these Watermill concepts at the adapter/composition boundary:
@@ -40,6 +56,20 @@ Keep these Watermill concepts at the adapter/composition boundary:
 - CQRS helpers: typed command bus, event bus, command processors, and event processors when that package is already in use.
 
 Treat messages as immutable after publishing. Use metadata for correlation and bounded routing attributes.
+
+Watermill is a library, not a framework. Do not make domain/application packages import Watermill types just because the adapter uses Watermill.
+
+## CQRS Event Bus And Processor
+
+When the repo uses Watermill's `cqrs` package:
+
+- Configure publisher/subscriber infrastructure in composition or adapters.
+- Use the same marshaler and topic naming rules for event bus and event processor.
+- Generate publish/subscribe topics from the event name only when that is the repo contract.
+- Keep typed handlers focused on mapping the event to an application command.
+- Register handlers with stable unique names.
+
+The event processor is another transport entry point, like HTTP. It should decode, call an application handler, and return an error only when retry/redelivery should happen.
 
 ## Application Boundary
 
@@ -80,6 +110,8 @@ Use one explicit router setup path:
 6. Register handlers with stable unique names.
 7. Run the router with a lifecycle context.
 
+Use SQL, PostgreSQL, MySQL, or SQLite Pub/Sub when durable message rows are useful and adding a separate broker is not justified. SQL Pub/Sub is also a natural fit for outbox/forwarder flows because the publish operation can participate in the same database transaction.
+
 ## Outbox Pattern
 
 Use an outbox when one command must persist state and publish events reliably:
@@ -100,6 +132,35 @@ type OutboxUserRepository interface {
     UpdateByID(ctx context.Context, userID int, updateFn func(*User) (bool, []any, error)) error
 }
 ```
+
+The reference outbox shape publishes into SQL through a transaction-bound event bus and uses Watermill Forwarder to move committed messages to the real broker. This repo's `examples/outbox/*` keeps the SQL rows visible as a readable implementation sketch.
+
+## Poison And Delayed Requeue
+
+For handlers that may fail repeatedly:
+
+- Use retry middleware for transient failures.
+- Move permanently failing or repeatedly failing messages to a poison/dead-letter path.
+- Keep tooling or operational queries for inspecting poison messages.
+- Prefer delayed requeue when one bad message should not block the topic forever.
+- Preserve message metadata needed for debugging: message UUID, event type, topic, correlation ID, aggregate ID, and error.
+
+Do not hide infinite retry loops. Operators need visibility and a way to retry or discard poison messages intentionally.
+
+## Durable Execution
+
+For workflows that must survive process crashes, DNS/network outages, and handler interruptions:
+
+- Persist validated input before processing it.
+- Use a persistent Pub/Sub backend for durable input; avoid in-memory Go channels for production input that must survive crashes.
+- Acknowledge the message only after durable side effects complete.
+- Keep all state changes for one event handler inside one database transaction.
+- If the handler publishes another event while changing state, use the outbox pattern so state and outgoing event commit together.
+- Make the handler idempotent so duplicate delivery does not change the final state.
+- Prove idempotency by duplicating messages in tests and asserting the same final state.
+- Prove atomicity with controlled failure/cancellation tests around retry middleware.
+
+Durability is a property you test. Treat "it usually works" as insufficient for event handlers that produce business-critical output.
 
 ## Ordering And Consumer Groups
 

@@ -144,8 +144,11 @@ Use one of these integration styles:
 - **Direct port** for synchronous in-process access with a stable request/response contract.
 - **Domain/application event** for asynchronous reactions.
 - **Shared kernel/common package** for stable cross-cutting primitives.
+- **Anti-corruption adapter** when another context's model should not leak into this context.
 
 Avoid importing another context's domain package directly unless the repo explicitly accepts that coupling.
+
+For deeper boundary decisions, use `go-strategic-ddd` before changing packages or service splits. This skill decides where code lives once the boundary is known.
 
 ## Dependency Injection
 

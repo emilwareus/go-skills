@@ -138,6 +138,20 @@ Use real dependencies for persistence behavior:
 
 Do not replace repository tests with mocks that only assert SQL methods were called unless the project explicitly uses that narrow approach.
 
+## Docker Compose In CI
+
+When integration/component tests need several services:
+
+- Reuse the local `docker-compose.yml` topology when possible.
+- Add a CI override file for image tags, networks, ports, and disabled hot reload.
+- Build service images before starting compose.
+- Run tests against the built images, not a different local binary.
+- Use service names on the compose network instead of `localhost` when tests run inside CI containers.
+- Tear down compose resources after the test step.
+- Keep CI step dependencies explicit so unrelated service builds can run in parallel.
+
+This keeps "works locally" and "passes CI" close enough that failures can be reproduced without a separate staging environment.
+
 ## Event-Driven Tests
 
 For Pub/Sub, Watermill, or outbox flows:
@@ -167,6 +181,7 @@ For concurrent code:
 - Global truncation cleanup in suites intended to run in parallel.
 - Hiding missing tests by adding or preserving coverage-baseline exceptions.
 - Raising `GOMAXPROCS` or parallelism flags without measuring the suite.
+- CI integration tests that run against a different binary or topology than the one being deployed.
 
 ## Examples
 
