@@ -23,8 +23,7 @@
 
 CREATE TABLE outbox_messages (
     -- A UUID generated when the message is enqueued. This is the
-    -- broker-level message ID and the basis for consumer-side dedup
-    -- (see ../idempotent_consumer.go).
+    -- broker-level message ID and the basis for consumer-side dedup.
     id           UUID        PRIMARY KEY,
 
     -- Logical topic / event name. Keep this stable; it is part of

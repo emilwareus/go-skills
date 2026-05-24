@@ -58,27 +58,66 @@ func runInTx(db *sql.DB, fn func(tx *sql.Tx) error) error {
 	return err
 }
 
-// db is the minimal interface that both *sql.DB and *sql.Tx satisfy.
-// Repositories accept this instead of *sql.DB directly, which means
-// the same repository instance can be constructed against either —
-// a long-lived one bound to *sql.DB for normal use, or a short-lived
-// one bound to *sql.Tx inside a transaction provider. The article
-// uses this trick to inject transaction-bound repositories into the
-// Adapters struct below.
+// db is the minimal interface that *sql.Tx satisfies. Repositories
+// created inside TransactionProvider accept this so the handler sees
+// repositories, not the concrete transaction object.
 type db interface {
 	QueryRowContext(ctx context.Context, query string, args ...interface{}) *sql.Row
 	ExecContext(ctx context.Context, query string, args ...interface{}) (sql.Result, error)
 }
 
-// PostgresUserRepository is shown here in its db-interface form so
-// the TransactionProvider below can hand it either *sql.DB or *sql.Tx.
-// The full UpdateByID body lives in update_fn.go.
-type PostgresUserRepository struct {
+// PostgresTxUserRepository is the tx-bound variant used only by
+// TransactionProvider. It is intentionally separate from
+// PostgresUserRepository in update_fn.go, because that type owns a
+// *sql.DB and opens its own transaction.
+type PostgresTxUserRepository struct {
 	db db
 }
 
-func NewPostgresUserRepository(db db) *PostgresUserRepository {
-	return &PostgresUserRepository{db: db}
+func NewPostgresTxUserRepository(db db) *PostgresTxUserRepository {
+	return &PostgresTxUserRepository{db: db}
+}
+
+func (r *PostgresTxUserRepository) UpdateByID(
+	ctx context.Context,
+	userID int,
+	updateFn func(user *User) (bool, error),
+) error {
+	row := r.db.QueryRowContext(ctx, "SELECT email, points FROM users WHERE id = $1 FOR UPDATE", userID)
+
+	var email string
+	var currentPoints int
+	err := row.Scan(&email, &currentPoints)
+	if err != nil {
+		return err
+	}
+
+	row = r.db.QueryRowContext(ctx, "SELECT next_order_discount FROM user_discounts WHERE user_id = $1 FOR UPDATE", userID)
+
+	var discount int
+	err = row.Scan(&discount)
+	if err != nil {
+		return err
+	}
+
+	discounts := UnmarshalDiscounts(discount)
+	user := UnmarshalUser(userID, email, currentPoints, discounts)
+
+	updated, err := updateFn(user)
+	if err != nil {
+		return err
+	}
+	if !updated {
+		return nil
+	}
+
+	_, err = r.db.ExecContext(ctx, "UPDATE users SET email = $1, points = $2 WHERE id = $3", user.Email(), user.Points(), user.ID())
+	if err != nil {
+		return err
+	}
+
+	_, err = r.db.ExecContext(ctx, "UPDATE user_discounts SET next_order_discount = $1 WHERE user_id = $2", user.Discounts().NextOrderDiscount(), user.ID())
+	return err
 }
 
 // PostgresAuditLogRepository is the second repository used to motivate
@@ -144,7 +183,7 @@ func NewTransactionProvider(db *sql.DB) *TransactionProvider {
 func (p *TransactionProvider) Transact(txFunc func(adapters Adapters) error) error {
 	return runInTx(p.db, func(tx *sql.Tx) error {
 		adapters := Adapters{
-			UserRepository:     NewPostgresUserRepository(tx),
+			UserRepository:     NewPostgresTxUserRepository(tx),
 			AuditLogRepository: NewPostgresAuditLogRepository(tx),
 		}
 		return txFunc(adapters)

@@ -42,15 +42,17 @@ Generic CRUD interfaces hide business queries, locking, tenant isolation, author
 
 ## Transaction Boundaries
 
-A transaction should cover one application command that needs immediate consistency. Use a transactor when the repo does not already have a unit-of-work convention:
+A transaction should cover one application command that needs immediate consistency. Prefer `UpdateByID` when one aggregate can own the load/mutate/save flow. When multiple repositories must commit together, use the article's `TransactionProvider` shape:
 
 ```go
-type Transactor interface {
-    WithinTx(ctx context.Context, fn func(ctx context.Context) error) error
+type TransactionProvider interface {
+    Transact(func(Adapters) error) error
 }
 ```
 
-Inside `WithinTx`, repositories should pick up the transaction from context or a unit-of-work object according to the project's convention. Check for accidental nested transactions.
+`TransactionProvider` creates transaction-bound adapters and passes them into the closure. The handler still does not receive a `*sql.Tx`.
+
+Treat this as the risky fallback: every cross-repository `SELECT` that relies on row-lock semantics must remember `FOR UPDATE`. Use the repository-owned `UpdateByID` pattern when it is enough.
 
 Keep external network calls outside database transactions unless the business case explicitly requires holding the lock and the failure mode is understood.
 
@@ -109,6 +111,12 @@ Use an outbox when domain/application events must be published reliably with a d
 
 Do not publish directly to a broker after commit and assume no event will be lost. Do not publish to a broker inside the transaction and assume rollback/commit will coordinate with the broker. Store the outgoing message in the same database transaction, then forward it.
 
+## Anti-patterns
+
+- Putting `*sql.Tx` in repository interfaces, handlers, or domain method signatures.
+- One repository per table when the business operation needs one aggregate boundary.
+- Splitting a command into `GetX`, `TakeX`, `AddY` calls orchestrated by the handler.
+
 ## Mapping Domain And Database
 
 Keep mapping explicit:
@@ -148,8 +156,6 @@ Annotated reference implementations live in `examples/`. They mirror the code fr
 
 - [`examples/transactor.go`](examples/transactor.go) — the article's `runInTx` helper plus the `TransactionProvider` + `Adapters` pattern for the case where multiple repositories (e.g. `UserRepository` + `AuditLogRepository`) must commit together.
 - [`examples/update_fn.go`](examples/update_fn.go) — the article's full `UpdateByID(ctx, userID, func(*User) (bool, error))` body against the `User`/`Discounts` aggregate, with the two `SELECT ... FOR UPDATE` loads and the two-table write.
-- [`examples/idempotency.go`](examples/idempotency.go) — supplementary: `INSERT ... ON CONFLICT DO NOTHING` idempotency-key store applied to the `UsePointsAsDiscount` command so retries replay the same result.
-- [`examples/optimistic_lock.go`](examples/optimistic_lock.go) — supplementary: version-column alternative to `FOR UPDATE` on the same `User` aggregate, with guidance on when each is the right choice.
 
 ## Done Criteria
 

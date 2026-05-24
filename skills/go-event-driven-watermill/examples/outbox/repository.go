@@ -25,6 +25,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"reflect"
 
 	"github.com/google/uuid"
 )
@@ -48,7 +49,7 @@ type Discounts struct{ nextOrderDiscount int }
 
 func (c *Discounts) NextOrderDiscount() int { return c.nextOrderDiscount }
 
-func (u *User) UsePointsAsDiscount(points int) error {
+func (u *User) UsePoints(points int) error {
 	if points <= 0 {
 		return errors.New("points must be greater than 0")
 	}
@@ -167,12 +168,17 @@ func insertOutbox(ctx context.Context, tx *sql.Tx, event any) error {
 }
 
 func topicOf(event any) string {
-	// In real code you'd use reflect.TypeOf(event).Name() or a
-	// registry keyed on the type. Keeping it explicit and minimal here.
-	switch event.(type) {
-	default:
+	t := reflect.TypeOf(event)
+	if t == nil {
 		return "events"
 	}
+	if t.Kind() == reflect.Pointer {
+		t = t.Elem()
+	}
+	if name := t.Name(); name != "" {
+		return name
+	}
+	return "events"
 }
 
 // runInTx is the same minimal helper from the article.

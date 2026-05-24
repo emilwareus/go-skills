@@ -31,7 +31,10 @@ Poor event names:
 SendEmailNow
 ApplyDiscountInOrdersService
 CallBillingWebhook
+PointsUsedForDiscount
 ```
+
+`PointsUsedForDiscount` is the article's own case study: it is an event from the users service, but the name exposes the orders service's discount use case. `PointsUsed` names the publishing-domain fact more cleanly.
 
 ## Watermill Basics
 
@@ -101,7 +104,9 @@ Avoid:
 - Publishing first and then writing data.
 - Holding a DB transaction while calling an external broker directly unless using a SQL Pub/Sub/outbox writer inside that transaction.
 
-Watermill SQL Pub/Sub plus Forwarder is a common implementation.
+The article's reference implementation uses Watermill SQL Pub/Sub plus Watermill Forwarder out of the box. The `examples/outbox/*` files in this skill are hand-rolled illustrations of the same mechanism, not a replacement recommendation.
+
+The thesis is not "accept inconsistency between services." It is "accept waiting": when the broker or downstream service is unavailable, the event waits in durable storage until it can be forwarded.
 
 ## Ordering And Consumer Groups
 
@@ -135,13 +140,12 @@ Use the smallest scope that covers the risk:
 
 ## Examples
 
-Annotated reference implementations live in `examples/`. They mirror the code from the Three Dots Labs [Distributed Transactions in Go](https://threedots.tech/post/distributed-transactions-in-go/) post — same `User` aggregate, `UsePointsAsDiscount` command, and `PointsUsedForDiscount` event — with extra teaching comments so each file reads standalone:
+Annotated reference implementations live in `examples/`. `handler_returns_events.go` mirrors the Three Dots Labs [Distributed Transactions in Go](https://threedots.tech/post/distributed-transactions-in-go/) handler evolution — same `User` aggregate, `UsePointsAsDiscount` command, and `PointsUsedForDiscount` event. The `outbox/` files are hand-rolled illustrations of the Watermill SQL Pub/Sub + Forwarder mechanism the article uses.
 
-- [`examples/handler_returns_events.go`](examples/handler_returns_events.go) — the article's three-version evolution of the handler: distributed monolith → publish-after-commit → outbox via `UpdateByID(ctx, id, func(*User) (bool, []any, error))`. Includes the consuming `OnPointsUsedForDiscountHandler` that maps the event to an `AddDiscount` command.
+- [`examples/handler_returns_events.go`](examples/handler_returns_events.go) — the article's three-version evolution of the handler: distributed monolith → publish-after-commit → outbox via `UpdateByID(ctx, id, func(*User) (bool, []any, error))`. The distributed monolith version has two services but synchronous, cross-service consistency assumptions; the outbox version keeps local consistency and waits durably for delivery. Includes the consuming `OnPointsUsedForDiscountHandler` that maps the event to an `AddDiscount` command.
 - [`examples/outbox/repository.go`](examples/outbox/repository.go) — the outbox-aware `UpdateByID` body: same load → mutate → save shape as the persistence skill's `update_fn.go`, with event INSERTs into the outbox in the same transaction.
 - [`examples/outbox/schema.sql`](examples/outbox/schema.sql) — hand-rolled equivalent of Watermill SQL Pub/Sub's table, with a partial index on pending rows.
 - [`examples/outbox/forwarder.go`](examples/outbox/forwarder.go) — hand-rolled equivalent of Watermill's Forwarder, using `SELECT ... FOR UPDATE SKIP LOCKED` for safe multi-replica draining.
-- [`examples/idempotent_consumer.go`](examples/idempotent_consumer.go) — supplementary: `processed_messages` dedup applied to `OnPointsUsedForDiscountHandler`, plus the unique-constraint shortcut when the side effect has a natural key.
 
 ## Done Criteria
 

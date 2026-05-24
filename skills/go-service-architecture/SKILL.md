@@ -17,6 +17,13 @@ adapters/infrastructure -> app/use cases -> domain
 service/cmd composition wires everything
 ```
 
+The Three Dots Labs vocabulary is:
+
+- **Domain**: business rules and domain types.
+- **Application**: commands, queries, and use-case orchestration.
+- **Ports**: transport-facing entry points such as HTTP, gRPC, CLI, or message handlers.
+- **Adapters**: database, external-service, Pub/Sub, and other infrastructure implementations.
+
 The domain must not know about HTTP, gRPC, SQL, queues, config, logging libraries, telemetry vendors, filesystem/process execution, or process lifecycle. The application layer can orchestrate those capabilities only through narrow interfaces.
 
 ## Decision Workflow
@@ -59,27 +66,48 @@ Avoid copying a large template into a small service. Add folders when the curren
 
 ## Application Services
 
-Application services coordinate IO, authorization, transaction scope, idempotency, logging/tracing boundaries, and domain calls. Keep each handler focused on one workflow:
+Application services coordinate IO, authorization, transaction scope, idempotency, logging boundaries, and domain calls. Keep each handler focused on one workflow:
 
 ```go
-type PlaceOrderHandler struct {
-    orders OrderRepository
-    tx     Transactor
-    clock  Clock
+type CancelTrainingHandler struct {
+    repo           trainingRepository
+    userService    userService
+    trainerService trainerService
 }
 
-func (h PlaceOrderHandler) Handle(ctx context.Context, cmd PlaceOrder) error {
-    return h.tx.WithinTx(ctx, func(ctx context.Context) error {
-        order, err := NewOrder(cmd.CustomerID, cmd.Lines, h.clock.Now())
-        if err != nil {
+func (h CancelTrainingHandler) Handle(ctx context.Context, cmd CancelTraining) error {
+    return h.repo.CancelTraining(ctx, cmd.TrainingUUID, func(ctx context.Context, tr *Training) error {
+        if err := tr.Cancel(); err != nil {
             return err
         }
-        return h.orders.Save(ctx, order)
+        if err := h.trainerService.CancelTraining(ctx, tr.Time); err != nil {
+            return fmt.Errorf("cancel trainer schedule: %w", err)
+        }
+        return nil
     })
 }
 ```
 
-Do not let application services become generic "manager" objects. Keep one method or handler per use case when workflows differ. Split commands and queries when read and write paths have different dependencies or models.
+Do not default to generic "manager" objects. The Clean Architecture article does use a cohesive multi-method `TrainingService`; the CQRS article splits that shape into one handler per command/query. Keep the multi-method service when the methods share one clear application concept, and split commands and queries when read and write paths have different dependencies or models.
+
+The CQRS article bundles handlers behind an application struct:
+
+```go
+type Application struct {
+    Commands Commands
+    Queries  Queries
+}
+
+type Commands struct {
+    CancelTraining CancelTrainingHandler
+}
+
+type Queries struct {
+    AvailableHours AvailableHoursHandler
+}
+```
+
+For cross-cutting command logging, use the article's deferred wrapper pattern: `LogCommandExecution` records the start, defers logging of the final error/result, and then calls the inner handler.
 
 ## Interfaces
 
@@ -138,7 +166,7 @@ Avoid importing another bounded context's domain package directly unless the rep
 Prefer explicit constructors and struct fields. Use code generation or DI frameworks only if the project already uses them.
 
 ```go
-func NewServer(log *slog.Logger, orders PlaceOrderHandler) *http.Server {
+func NewServer(log *logrus.Entry, orders PlaceOrderHandler) *http.Server {
     mux := http.NewServeMux()
     registerOrderRoutes(mux, log, orders)
     return &http.Server{Handler: mux}
@@ -155,6 +183,13 @@ Keep wiring centralized so business packages do not import infrastructure packag
 - Search app for concrete adapter imports unless the repo intentionally wires there.
 - Check whether commands and queries are named entry points, not anonymous service methods.
 - Check whether component tests cover new wiring.
+
+## Examples
+
+Annotated reference implementations live in `examples/`. They draw from the Training/Trainer domain in the Three Dots Labs [Introducing Clean Architecture](https://threedots.tech/post/introducing-clean-architecture/) and [Basic CQRS in Go](https://threedots.tech/post/basic-cqrs-in-go/) posts:
+
+- [`examples/command_handler.go`](examples/command_handler.go) — CQRS-post-style `CancelTrainingHandler` with three narrow interfaces (`trainingRepository`, `userService`, `trainerService`) defined in the handler package; shows nil-check constructor panics and the UpdateFn-style repo call.
+- [`examples/query_handler.go`](examples/query_handler.go) — `AvailableHoursHandler` reading through `AvailableHoursReadModel` and returning flat `Date` DTOs, with notes on what CQRS does and does not require.
 
 ## Done Criteria
 

@@ -1,11 +1,20 @@
 ---
 name: go-testing
-description: Write effective Go tests for domain logic, application services, HTTP/gRPC handlers, repositories, concurrency, component flows, integrations, and event-driven systems. Use for Go testing tasks involving table-driven tests, fakes versus mocks, testcontainers, real database tests, golden files, race tests, fixtures, t.Parallel, coverage gaps, regression tests, or refactoring code to become testable without over-mocking.
+description: Write effective Go tests for domain logic, application services, HTTP/gRPC handlers, repositories, concurrency, component flows, integrations, and event-driven systems. Use for Go testing tasks involving table-driven tests, fakes versus mocks, docker-compose-backed integration tests, real database tests, golden files, race tests, fixtures, t.Parallel, coverage gaps, regression tests, or refactoring code to become testable without over-mocking.
 ---
 
 # Go Testing
 
 Use this when a Go change needs tests or testability refactoring. Read local test docs first; repo-specific gates such as `make test`, `make core-check`, `paralleltest`, adapter-test lints, or component-test lints override this guidance.
+
+## Four Principles
+
+The database integration testing article leads with four principles:
+
+- **Fast**: keep feedback tight enough that developers actually run the suite.
+- **Testing enough scenarios on all levels**: cover domain, application, adapter, and component risks at the right scope.
+- **Robust and deterministic**: no accidental sleeps, order dependencies, or shared-state flakes.
+- **Executable locally**: the common suite should run on a laptop, with about a 10s target for the everyday path.
 
 ## Testing Strategy
 
@@ -27,8 +36,9 @@ Do not mock pure domain behavior. Do not unit test implementation details that a
 4. Use table tests for input/output variation.
 5. Use named cases that explain the scenario.
 6. Assert observable outcomes, not private call sequences unless the sequence is the contract.
-7. Run focused tests first, then the package or repo test command.
-8. If the repo has coverage lint baselines, reduce them; do not add new baseline entries to hide missing tests.
+7. Sabotage the implementation once when the test is new or suspicious: temporarily break the guarded behavior and confirm the test fails for the right reason.
+8. Run focused tests first, then the package or repo test command.
+9. If the repo has coverage lint baselines, reduce them; do not add new baseline entries to hide missing tests.
 
 ## Table Tests
 
@@ -86,7 +96,9 @@ Avoid tests that only prove "method X called method Y" for ordinary orchestratio
 
 ## Parallel Tests
 
-Use `t.Parallel()` for IO-heavy package, integration, component, API, and table subtests when fixtures are parallel-safe. Some repos mandate `t.Parallel()` everywhere; follow that rule if documented.
+Use `t.Parallel()` for IO-heavy package, integration, component, API, and slower table subtests when fixtures are parallel-safe. Do not add `t.Parallel()` to fast unit/domain tests just to satisfy a habit; the scheduling overhead and fixture constraints can outweigh any win.
+
+If the repo uses the `paralleltest` linter, follow its local exemptions and comments. The article's point is deliberate parallelism, not mechanically marking every test.
 
 Parallel-safe fixtures require:
 
@@ -96,7 +108,13 @@ Parallel-safe fixtures require:
 - No shared mutable package state without synchronization.
 - Cleanup that targets only resources created by the test.
 
-Use `go test -json`, `-parallel`, `-p`, and visualization tools when slow test suites appear serialized despite many cores.
+Use `vgt` (Visualizing Go Tests) with `go test -json` when slow test suites appear serialized despite many cores. Distinguish the knobs:
+
+```sh
+go test ./... -parallel 16 -p 4
+```
+
+`-parallel` controls how many `t.Parallel()` tests may run at once inside one package. `-p` controls how many packages `go test` runs concurrently. Raising `GOMAXPROCS` above the actual core count can slow the suite down through scheduler overhead; measure before changing it.
 
 ## HTTP Handler Tests
 
@@ -124,8 +142,9 @@ Use component tests when unit tests cannot cover service wiring or in-process be
 Use real dependencies for persistence behavior:
 
 - SQL constraints, transactions, isolation, locking, migrations, and query mapping need integration tests.
-- Prefer testcontainers or the project's existing local database test harness.
-- Reset state per test with transactions, schemas, unique IDs, or truncation helpers.
+- Prefer the article's docker-compose-style local database harness or the project's existing equivalent.
+- Use unique IDs, schemas, or row namespaces as the primary isolation tool.
+- Prefer targeted cleanup for resources created by the test; avoid global truncation/cleanup unless the suite is deliberately serialized.
 - Keep fixtures explicit and close to the test unless shared fixtures are already well-designed.
 
 Do not replace repository tests with mocks that assert SQL strings unless the project explicitly uses sqlmock for a narrow reason.
@@ -149,6 +168,15 @@ For concurrent code:
 - Avoid sleeps as synchronization. Prefer channels, wait groups, fake clocks, or eventually assertions with bounded timeouts.
 - Test cancellation and shutdown paths.
 - Check for goroutine leaks when the project has helpers for it.
+
+## Examples
+
+Worked test files demonstrating the patterns above live at the repository root in [`tests/`](../../tests/) rather than inside this skill, so they are not shipped when an agent installs the skill. They are kept in the repo for reference and to be exercised by `go test ./tests/...`:
+
+- [`tests/aggregate/aggregate_test.go`](../../tests/aggregate/aggregate_test.go) — table tests for the `Hour` aggregate (`ScheduleTraining`), fixture helpers with `t.Helper()`, `errors.Is` over string matching.
+- [`tests/handler/handler_test.go`](../../tests/handler/handler_test.go) — application-service tests for `CancelTrainingHandler` using hand-written fakes (not mocks) that record state; assertions are on observable outcomes, not call sequences.
+- [`tests/component/component_test.go`](../../tests/component/component_test.go) — event-driven component test using `assert.EventuallyWithT` for bounded eventual assertions and per-test correlation-ID filtering for parallel safety.
+- [`tests/integration/integration_test.go`](../../tests/integration/integration_test.go) — real-database integration test that proves `SELECT ... FOR UPDATE` actually serializes concurrent writes, with unique IDs per test for fixture isolation.
 
 ## Done Criteria
 

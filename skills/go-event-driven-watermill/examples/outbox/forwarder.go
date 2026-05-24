@@ -21,7 +21,7 @@
 //
 //   - Exactly-once. The window between "broker accepted the message"
 //     and "we marked the row published" is real, and on crash we will
-//     re-publish. Consumers MUST dedup (see ../idempotent_consumer.go).
+//     re-publish. Consumers MUST make their side effects idempotent.
 //
 //   - Strict global ordering. Within a single forwarder instance the
 //     order is insertion-order, but two instances of the forwarder

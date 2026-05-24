@@ -97,6 +97,17 @@ type UserRepository interface {
 	UpdateByID(ctx context.Context, userID int, updateFn func(user *User) (bool, error)) error
 }
 
+// PostgresUserRepository is the standalone repository from the
+// UpdateFn pattern. It owns a *sql.DB, opens its own transaction in
+// UpdateByID, and keeps the *sql.Tx inside this file.
+type PostgresUserRepository struct {
+	db *sql.DB
+}
+
+func NewPostgresUserRepository(db *sql.DB) *PostgresUserRepository {
+	return &PostgresUserRepository{db: db}
+}
+
 // UpdateByID is the body shown in the article. Each step is worth
 // reading once:
 //
@@ -122,16 +133,7 @@ func (r *PostgresUserRepository) UpdateByID(
 	userID int,
 	updateFn func(user *User) (bool, error),
 ) error {
-	// runInTx wants a *sql.DB. The version of this repo bound to a
-	// *sql.Tx (via TransactionProvider) takes a different path —
-	// see distributed_outbox example for the variant that runs
-	// inside an existing tx instead of opening its own.
-	sqlDB, ok := r.db.(*sql.DB)
-	if !ok {
-		return errors.New("UpdateByID requires *sql.DB; for shared-tx use, see TransactionProvider variant")
-	}
-
-	return runInTx(sqlDB, func(tx *sql.Tx) error {
+	return runInTx(r.db, func(tx *sql.Tx) error {
 		row := tx.QueryRowContext(ctx, "SELECT email, points FROM users WHERE id = $1 FOR UPDATE", userID)
 
 		var email string

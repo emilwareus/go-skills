@@ -27,13 +27,11 @@ import (
 	"fmt"
 )
 
-// PointsUsedForDiscount is the event the article publishes. A note
-// the article itself raises: event names should describe facts in
-// the publishing domain (something already happened) rather than
-// commands to other services. "PointsUsedForDiscount" leans into the
-// command-y side — it tells the orders service what to do — and the
-// article uses it to motivate the discussion of better naming
-// elsewhere. The code keeps the name to match the article verbatim.
+// PointsUsedForDiscount is the event the article publishes. The
+// article explicitly calls this name poorly designed: it leaks the
+// orders-service discount use case into the users domain instead of
+// naming only the fact that points were used. The code keeps the
+// name to match the article verbatim.
 type PointsUsedForDiscount struct {
 	UserID int `json:"user_id"`
 	Points int `json:"points"`
@@ -84,7 +82,7 @@ type UsePointsAsDiscountHandlerV2 struct {
 
 func (h UsePointsAsDiscountHandlerV2) Handle(ctx context.Context, cmd UsePointsAsDiscount) error {
 	err := h.userRepository.UpdateByID(ctx, cmd.UserID, func(user *User) (bool, error) {
-		err := user.UsePointsAsDiscount(cmd.Points)
+		err := user.UsePoints(cmd.Points)
 		if err != nil {
 			return false, err
 		}
@@ -133,7 +131,7 @@ type OutboxUserRepository interface {
 
 func (h UsePointsAsDiscountHandler) Handle(ctx context.Context, cmd UsePointsAsDiscount) error {
 	return h.userRepository.UpdateByID(ctx, cmd.UserID, func(user *User) (bool, []any, error) {
-		err := user.UsePointsAsDiscount(cmd.Points)
+		err := user.UsePoints(cmd.Points)
 		if err != nil {
 			return false, nil, err
 		}
@@ -191,7 +189,7 @@ type Discounts struct{ nextOrderDiscount int }
 
 func (c *Discounts) NextOrderDiscount() int { return c.nextOrderDiscount }
 
-func (u *User) UsePointsAsDiscount(points int) error {
+func (u *User) UsePoints(points int) error {
 	if points <= 0 {
 		return fmt.Errorf("points must be greater than 0")
 	}
