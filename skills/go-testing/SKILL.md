@@ -1,23 +1,30 @@
 ---
 name: go-testing
-description: Write effective Go tests for domain logic, application services, HTTP/gRPC handlers, repositories, concurrency, component flows, integrations, and event-driven systems. Use for Go testing tasks involving table-driven tests, fakes versus mocks, testcontainers, real database tests, golden files, race tests, fixtures, t.Parallel, coverage gaps, regression tests, or refactoring code to become testable without over-mocking.
+description: Write effective Go tests for domain logic, application services, HTTP/gRPC handlers, repositories, concurrency, component flows, integrations, and event-driven systems. Use for Go testing tasks involving table-driven tests, fakes, docker-compose-backed integration tests, real database tests, golden files, race tests, fixtures, t.Parallel, coverage gaps, regression tests, or refactoring code to become testable.
 ---
 
 # Go Testing
 
-Use this when a Go change needs tests or testability refactoring. Read local test docs first; repo-specific gates such as `make test`, `make core-check`, `paralleltest`, adapter-test lints, or component-test lints override this guidance.
+Use this when a Go change needs tests or testability refactoring. Follow local test commands and lint rules first, then choose the smallest test scope that proves the behavior. Keep the everyday path fast enough to run locally, with roughly 10 seconds as a useful target when the repo can support it.
 
-## Testing Strategy
+## Test Principles
 
-Choose the lowest test level that can fail for the behavior under review:
+- **Fast**: keep everyday feedback tight enough to run locally.
+- **Enough scenarios on all levels**: cover domain, application, adapter, and component risks at the right scope.
+- **Robust and deterministic**: use explicit setup, bounded waits, unique IDs, and stable clocks.
+- **Executable locally**: keep the common suite runnable on a laptop.
+
+## Test Scope
+
+Choose the lowest level that can fail for the behavior under review:
 
 1. Domain tests with no IO.
-2. Application service tests with fakes for ports when orchestration branches or error handling matters.
-3. Adapter/integration tests against real dependencies when behavior depends on SQL, serialization, provider clients, broker semantics, or concurrency.
+2. Application service tests with fakes for ports.
+3. Adapter/integration tests against real dependencies for SQL, serialization, provider clients, broker semantics, or concurrency.
 4. Component tests for full in-process service behavior with external edges mocked.
-5. End-to-end tests only for critical cross-service user workflows.
+5. End-to-end tests for critical cross-service user workflows.
 
-Do not mock pure domain behavior. Do not unit test implementation details that a refactor should be free to change. Do not add tests that only prove the mock received the same arguments as the code under test.
+Do not mock pure domain behavior. Do not unit test implementation details that a refactor should be free to change.
 
 ## Workflow
 
@@ -26,9 +33,10 @@ Do not mock pure domain behavior. Do not unit test implementation details that a
 3. Make time, IDs, randomness, and external dependencies injectable.
 4. Use table tests for input/output variation.
 5. Use named cases that explain the scenario.
-6. Assert observable outcomes, not private call sequences unless the sequence is the contract.
-7. Run focused tests first, then the package or repo test command.
-8. If the repo has coverage lint baselines, reduce them; do not add new baseline entries to hide missing tests.
+6. Assert observable outcomes.
+7. Sabotage the implementation once when a new test is suspicious: temporarily break the guarded behavior and confirm the test fails for the right reason.
+8. Run focused tests first, then the package or repo test command.
+9. Reduce coverage lint baselines when the repo has them.
 
 ## Table Tests
 
@@ -55,11 +63,11 @@ func TestInvoiceApprove(t *testing.T) {
 }
 ```
 
-Use slices when order matters; use maps when it does not. For parallel subtests, the `for i := range tests { tc := tests[i] }` shape stays obvious across Go versions.
+Use slices when order matters. Use maps when order does not matter. For parallel subtests, capture the case with `tc := tests[i]`.
 
-## Fakes Over Mocks
+## Fakes
 
-Prefer small fakes owned by the test package:
+Prefer small fakes owned by the test package for narrow interfaces:
 
 ```go
 type fakeOrders struct {
@@ -76,27 +84,27 @@ func (f *fakeOrders) Save(ctx context.Context, order *Order) error {
 }
 ```
 
-Use mocks when:
-
-- The dependency has many methods and a generated mock already exists.
-- The interaction order is part of the behavior.
-- The project has an established mocking convention.
-
-Avoid tests that only prove "method X called method Y" for ordinary orchestration.
+Use generated mocks when the dependency has many methods, interaction order is the contract, or the repo already has a mock convention.
 
 ## Parallel Tests
 
-Use `t.Parallel()` for IO-heavy package, integration, component, API, and table subtests when fixtures are parallel-safe. Some repos mandate `t.Parallel()` everywhere; follow that rule if documented.
+Use `t.Parallel()` for IO-heavy package, integration, component, API, and slower table subtests when fixtures are parallel-safe. Keep fast domain/unit tests simple unless parallelism measurably helps. If the repo uses the `paralleltest` linter, follow local exemptions and comments; the goal is deliberate parallelism, not mechanical annotations.
 
 Parallel-safe fixtures require:
 
 - Unique IDs, emails, org names, tenant IDs, and idempotency keys.
-- No assertions on global list length unless isolated.
+- Isolated assertions for list queries.
 - Fixed timestamps for ordered queries.
-- No shared mutable package state without synchronization.
-- Cleanup that targets only resources created by the test.
+- Synchronized access to shared mutable state.
+- Targeted cleanup for resources created by the test.
 
-Use `go test -json`, `-parallel`, `-p`, and visualization tools when slow test suites appear serialized despite many cores.
+Use `vgt` with `go test -json` when slow test suites appear serialized. Tune package and test parallelism separately:
+
+```sh
+go test ./... -parallel 16 -p 4
+```
+
+`-parallel` controls how many `t.Parallel()` tests may run at once inside one package. `-p` controls how many packages `go test` runs concurrently. Raising `GOMAXPROCS` above the actual core count can slow the suite through scheduler overhead, so measure before changing it.
 
 ## HTTP Handler Tests
 
@@ -104,18 +112,17 @@ Test handlers with `httptest`:
 
 - Build requests with realistic JSON and headers.
 - Assert status, response body, and relevant side effects.
-- Use fake application services rather than real databases unless this is an integration/component test.
+- Use fake application services for handler-scope tests.
 - Cover malformed JSON, validation failures, auth failures, not found, conflict, and unexpected errors.
-
-Keep error mapping tests near the transport layer.
+- Keep error mapping tests near the transport layer.
 
 ## Component Tests
 
 Use component tests when unit tests cannot cover service wiring or in-process behavior:
 
-- Call real HTTP/gRPC/subscriber/direct-port entry points.
-- Use real app/domain/internal adapters unless they cross process, network, or provider boundaries.
-- Mock only external systems owned by other services or providers.
+- Call real HTTP, gRPC, subscriber, or direct-port entry points.
+- Use real app/domain/internal adapters.
+- Mock external systems owned by other services or providers.
 - Assert public behavior: response, persisted state, emitted event, or query result.
 - Keep them faster and more focused than E2E tests.
 
@@ -123,22 +130,37 @@ Use component tests when unit tests cannot cover service wiring or in-process be
 
 Use real dependencies for persistence behavior:
 
-- SQL constraints, transactions, isolation, locking, migrations, and query mapping need integration tests.
-- Prefer testcontainers or the project's existing local database test harness.
-- Reset state per test with transactions, schemas, unique IDs, or truncation helpers.
-- Keep fixtures explicit and close to the test unless shared fixtures are already well-designed.
+- SQL constraints, transactions, isolation, locking, migrations, and query mapping.
+- Docker-compose-style local database harness or the project's existing equivalent.
+- Unique IDs, schemas, or row namespaces as the primary isolation tool.
+- Targeted cleanup for resources created by the test.
+- Explicit fixtures close to the test.
 
-Do not replace repository tests with mocks that assert SQL strings unless the project explicitly uses sqlmock for a narrow reason.
+Do not replace repository tests with mocks that only assert SQL methods were called unless the project explicitly uses that narrow approach.
+
+## Docker Compose In CI
+
+When integration/component tests need several services:
+
+- Reuse the local `docker-compose.yml` topology when possible.
+- Add a CI override file for image tags, networks, ports, and disabled hot reload.
+- Build service images before starting compose.
+- Run tests against the built images, not a different local binary.
+- Use service names on the compose network instead of `localhost` when tests run inside CI containers.
+- Tear down compose resources after the test step.
+- Keep CI step dependencies explicit so unrelated service builds can run in parallel.
+
+This keeps "works locally" and "passes CI" close enough that failures can be reproduced without a separate staging environment.
 
 ## Event-Driven Tests
 
 For Pub/Sub, Watermill, or outbox flows:
 
 - Prefer component tests for "event in -> observable state out" and "command in -> event out".
-- Use real local broker/SQL PubSub when Ack/Nack, retry, ordering, or forwarding behavior matters.
+- Use a real local broker or SQL Pub/Sub when Ack/Nack, retry, ordering, or forwarding behavior matters.
 - Filter consumed events by unique ID or correlation metadata.
-- Use bounded eventual assertions instead of fixed sleeps.
-- Test idempotent consumers with duplicate messages.
+- Use bounded eventual assertions.
+- Test duplicate delivery.
 
 ## Concurrency Tests
 
@@ -146,14 +168,34 @@ For concurrent code:
 
 - Run `go test -race`.
 - Use contexts with deadlines.
-- Avoid sleeps as synchronization. Prefer channels, wait groups, fake clocks, or eventually assertions with bounded timeouts.
+- Use channels, wait groups, fake clocks, or eventually assertions for synchronization.
 - Test cancellation and shutdown paths.
-- Check for goroutine leaks when the project has helpers for it.
+- Check for goroutine leaks when the project has helpers.
+
+## Anti-Patterns
+
+- Tests that only prove a mock received the same arguments the implementation just assembled.
+- `t.Parallel()` added to fast unit tests by habit, increasing scheduling overhead and fixture constraints.
+- Shared global fixtures, list-length assertions, or cleanup that deletes data created by other parallel tests.
+- Fixed sleeps for async work instead of bounded eventual assertions or synchronization.
+- Global truncation cleanup in suites intended to run in parallel.
+- Hiding missing tests by adding or preserving coverage-baseline exceptions.
+- Raising `GOMAXPROCS` or parallelism flags without measuring the suite.
+- CI integration tests that run against a different binary or topology than the one being deployed.
+
+## Examples
+
+Worked test files live at the repository root in [`tests/`](../../tests/) and are exercised by `go test ./tests/...`:
+
+- [`tests/aggregate/aggregate_test.go`](../../tests/aggregate/aggregate_test.go) - table tests for the `Hour` aggregate, fixture helpers with `t.Helper()`, and `errors.Is`.
+- [`tests/handler/handler_test.go`](../../tests/handler/handler_test.go) - application-service tests with hand-written fakes and observable state assertions.
+- [`tests/component/component_test.go`](../../tests/component/component_test.go) - event-driven component test using bounded eventual assertions and per-test correlation-ID filtering.
+- [`tests/integration/integration_test.go`](../../tests/integration/integration_test.go) - real-database integration test shape for `SELECT ... FOR UPDATE` concurrency behavior.
 
 ## Done Criteria
 
-- Tests fail for business regressions, not incidental refactors.
+- Tests fail for business regressions.
 - Test setup makes dependencies and time explicit.
 - Integration tests cover behavior that unit tests would fake incorrectly.
 - The selected `go test` command was run, or the blocker is recorded.
-- Slow or flaky tests have an explicit scope reason, not accidental sleeps or shared fixtures.
+- Slow tests have an explicit scope reason.

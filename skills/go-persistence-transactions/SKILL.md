@@ -1,62 +1,57 @@
 ---
 name: go-persistence-transactions
-description: Implement Go persistence, repositories, migrations, transaction boundaries, aggregate storage, UpdateFn patterns, idempotency, locking, tenant isolation, and outbox/event forwarding. Use for Go tasks involving database adapters, sqlc, database/sql, pgx, Ent, GORM, Firestore, repository design, unit-of-work patterns, transactional application services, consistency boundaries, optimistic concurrency, reliable event publishing, or Three Dots Labs repository/transaction patterns.
+description: Implement Go persistence with aggregate repositories, repository-owned transactions, UpdateFn methods, row locking, migrations, tenant scoping, idempotency, and reliable outbox publishing. Use for Go tasks involving database adapters, sqlc, database/sql, pgx, Ent, GORM, Firestore, repository design, transactional application services, consistency boundaries, or reliable event publishing.
 ---
 
 # Go Persistence And Transactions
 
-Use this when a Go change touches repositories, transactions, migrations, database adapters, idempotency, locking, or outbox publishing. Read local migration and adapter-test rules first.
+Use this when a Go change touches repositories, transactions, migrations, database adapters, idempotency, locking, or outbox publishing. Keep transaction handles inside adapters and make repository methods express business consistency boundaries.
 
-## Persistence Principles
+## Repository Shape
 
-- Align transaction boundaries with application use cases and aggregate consistency rules.
-- Keep domain types independent of database tags and ORM lifecycle hooks unless the project intentionally uses active record.
-- Keep repository interfaces narrow and owned by the consuming package or aggregate domain.
-- Use migrations according to the repo's documented source of truth.
-- Decide idempotency, tenant isolation, and concurrency behavior before writing adapter code.
-- Keep database transaction objects out of domain and transport signatures.
-
-## Repository Design
-
-Use repositories for aggregate persistence or specific business queries, not generic table access:
+Use repositories for aggregate persistence and business queries. The method name should describe the operation the application needs, not the table being touched:
 
 ```go
-type OrderRepository interface {
-    Get(ctx context.Context, id OrderID) (*Order, error)
-    Save(ctx context.Context, order *Order) error
+type UserRepository interface {
+    UpdateByID(ctx context.Context, userID int, updateFn func(*User) (bool, error)) error
 }
 ```
 
-Avoid:
+Repository methods should make consistency needs explicit:
 
-```go
-type Repository[T any] interface {
-    Create(context.Context, T) error
-    Update(context.Context, T) error
-    Delete(context.Context, string) error
-    List(context.Context) ([]T, error)
-}
-```
-
-Generic CRUD interfaces hide business queries, locking, tenant isolation, authorization, and consistency requirements.
+- Load the complete aggregate needed by the business operation.
+- Lock rows with `SELECT ... FOR UPDATE` for short critical sections.
+- Rehydrate domain objects through trusted constructors.
+- Run the callback against the aggregate.
+- Persist aggregate changes and commit in the adapter.
+- Return domain errors or wrapped infrastructure errors without exposing driver details in the interface.
 
 ## Transaction Boundaries
 
-A transaction should cover one application command that needs immediate consistency. Use a transactor when the repo does not already have a unit-of-work convention:
+Use one database transaction for one immediate consistency boundary. The preferred shape is a repository-owned UpdateFn method:
 
 ```go
-type Transactor interface {
-    WithinTx(ctx context.Context, fn func(ctx context.Context) error) error
+err := users.UpdateByID(ctx, cmd.UserID, func(user *User) (bool, error) {
+    if err := user.UsePointsAsDiscount(cmd.Points); err != nil {
+        return false, err
+    }
+    return true, nil
+})
+```
+
+When multiple repositories must commit together, use a transaction provider that passes transaction-bound adapters into the closure:
+
+```go
+type TransactionProvider interface {
+    Transact(func(Adapters) error) error
 }
 ```
 
-Inside `WithinTx`, repositories should pick up the transaction from context or a unit-of-work object according to the project's convention. Check for accidental nested transactions.
-
-Keep external network calls outside database transactions unless the business case explicitly requires holding the lock and the failure mode is understood.
+Handlers should receive repositories or adapters, not `*sql.Tx`. Treat `TransactionProvider` as the fallback for workflows that truly need several repositories in one commit. The repository-owned UpdateFn is simpler and safer when one aggregate can own the load/mutate/save sequence.
 
 ## UpdateFn Pattern
 
-When an aggregate must be loaded, changed, and saved consistently, prefer an UpdateFn-style repository method:
+Use UpdateFn when a command must load, mutate, and save an aggregate consistently:
 
 ```go
 type AccountRepository interface {
@@ -64,22 +59,25 @@ type AccountRepository interface {
 }
 ```
 
-The adapter owns the transaction, lock, rehydration, persistence mapping, and commit/rollback. The callback owns domain decisions:
+The adapter owns transaction start, locking, rehydration, persistence mapping, commit, and rollback. The callback owns domain decisions.
 
-```go
-err := accounts.UpdateByID(ctx, cmd.AccountID, func(account *Account) error {
-    return account.UseCredits(cmd.Amount)
-})
-```
+## Anti-Patterns
 
-This keeps `*sql.Tx`, `*gorm.DB`, Firestore transaction handles, and lock details out of application and domain code.
+- `*sql.Tx`, `*gorm.DB`, Firestore transaction handles, or other transaction objects in handler, domain, or repository-interface method signatures.
+- Context-based transaction propagation that makes every repository guess whether it is inside a transaction.
+- One repository per table when the business operation needs one aggregate boundary.
+- Handler-orchestrated `GetX`, `TakeX`, `AddY`, and `SaveX` sequences that should be one repository method.
+- Cross-repository transaction blocks that forget row locks such as `SELECT ... FOR UPDATE` on data being changed.
+- Holding row locks while calling external APIs, brokers, payment providers, or other services.
+- Publishing directly to a broker after a database commit when the event must not be lost.
+- Replacing repository integration tests with mocks that only prove a method was called.
 
 ## Idempotency
 
 For commands retried by clients, workers, queues, or webhooks:
 
 - Accept or derive an idempotency key.
-- Store request identity and final outcome when retries must receive the same response.
+- Store request identity and final outcome when retries need the same response.
 - Use unique constraints for natural de-duplication.
 - Treat duplicate delivery as expected behavior.
 - Return the same logical result for the same command unless the API documents a different retry contract.
@@ -88,14 +86,14 @@ Common cases: payments, webhooks, queue consumers, email sends, and public POST 
 
 ## Locking And Concurrency
 
-Choose deliberately:
+Choose one concurrency control per consistency need:
 
 - Unique constraints for "only one can exist" rules.
 - Optimistic locking with version columns for user-edited aggregates.
-- `SELECT ... FOR UPDATE` or equivalent for short critical sections.
-- Serializable/repeatable-read isolation only when the use case needs it and tests cover it.
+- `SELECT ... FOR UPDATE` for short critical sections.
+- Serializable or repeatable-read isolation when the use case needs it and tests cover it.
 
-Keep lock duration short. Do not hold locks while calling external APIs. Add stress/concurrency tests for lost-update, duplicate-insert, or deadlock-prone paths.
+Keep lock duration short. Keep external network calls outside row locks. Add stress or concurrency tests for lost-update, duplicate-insert, and deadlock-prone paths.
 
 ## Outbox Pattern
 
@@ -107,7 +105,7 @@ Use an outbox when domain/application events must be published reliably with a d
 4. Mark rows published or retry with backoff.
 5. Make consumers idempotent.
 
-Do not publish directly to a broker after commit and assume no event will be lost. Do not publish to a broker inside the transaction and assume rollback/commit will coordinate with the broker. Store the outgoing message in the same database transaction, then forward it.
+Store outgoing messages in the same database transaction as the state change, then forward committed messages.
 
 ## Mapping Domain And Database
 
@@ -115,9 +113,29 @@ Keep mapping explicit:
 
 - Convert database nulls into domain optional values consciously.
 - Validate reconstructed domain objects or use trusted rehydration constructors.
-- Avoid leaking database IDs or nullable fields into domain APIs unless they are business concepts.
-- Keep SQL column names and domain field names allowed to differ.
-- Keep tenant/org/owner constraints in queries, not only in handlers.
+- Keep SQL column names and domain field names free to differ.
+- Include tenant, organization, or owner constraints in repository queries.
+- Expose database IDs or nullable fields in domain APIs only when they are business concepts.
+
+## Secure Repository Methods
+
+Put visibility-sensitive checks where they cannot be skipped accidentally:
+
+- Model who can see or mutate an aggregate as domain logic.
+- Pass the authenticated/domain user into repository methods that load protected data.
+- Run the visibility check immediately after rehydration and before returning the aggregate or running `updateFn`.
+- Keep tenant, owner, organization, and soft-delete filters inside repository queries when they are part of data access.
+- Test "same ID, wrong user/tenant" paths against the repository, not only at the HTTP handler.
+
+For update methods, the repository should load the aggregate, check access, then call the callback:
+
+```go
+type TrainingRepository interface {
+    UpdateTraining(ctx context.Context, id string, user TrainingUser, updateFn func(*Training) error) error
+}
+```
+
+This does not move all authorization into persistence. The business rule still belongs in domain code. The repository makes the rule hard to bypass for reads and updates that expose protected data.
 
 ## Migrations
 
@@ -125,9 +143,9 @@ For schema changes:
 
 - Follow the repo workflow: model-first, migration-first, or generated migrations.
 - Add backward-compatible migrations before code that depends on them when deployments can overlap.
-- Backfill large data sets separately from schema changes when needed.
+- Backfill large data sets separately from schema changes.
 - Add constraints after data is clean.
-- Do not rewrite migrations already applied to production.
+- Keep already-applied production migrations immutable.
 
 ## Adapter Tests
 
@@ -135,12 +153,19 @@ Use real database tests for:
 
 - Query shape and row mapping.
 - Tenant isolation.
+- Owner/visibility checks on both read and update repository methods.
 - Unique constraints and duplicate handling.
 - Transactions, locks, and optimistic versions.
 - Soft deletes and authorization-sensitive filters.
 - Migration compatibility.
 
-Avoid mocking a repository to prove a SQL method was called. That does not test persistence behavior.
+Repository tests should prove persistence behavior against the real database engine or the project's accepted local harness.
+
+## Examples
+
+- [`examples/transactor.go`](examples/transactor.go) - `runInTx`, transaction-bound adapters, and `TransactionProvider`.
+- [`examples/update_fn.go`](examples/update_fn.go) - `UpdateByID(ctx, userID, func(*User) (bool, error))` with row locks and two-table aggregate persistence.
+- [`examples/repository_security.go`](examples/repository_security.go) - repository read/update methods that require a domain user and call `CanUserSeeTraining` after rehydration.
 
 ## Done Criteria
 
@@ -148,4 +173,4 @@ Avoid mocking a repository to prove a SQL method was called. That does not test 
 - Repositories express aggregate operations and business queries.
 - Retried commands and duplicate messages behave predictably.
 - Database-specific behavior is covered by integration tests.
-- Migrations and generated schema artifacts follow the repo's documented workflow.
+- Migrations and generated schema artifacts follow the repo workflow.

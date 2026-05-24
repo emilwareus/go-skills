@@ -5,34 +5,41 @@ description: Structure Go services with clear package boundaries, dependency dir
 
 # Go Service Architecture
 
-Use this when package boundaries, dependency direction, or service wiring are part of a Go change. Read local docs such as `ARCHITECTURE.md`, `CODE_PATTERNS.md`, `CLAUDE.md`, `AGENTS.md`, or `TESTING_GUIDELINES.md` before moving code.
+Use this when package boundaries, dependency direction, or service wiring are part of a Go change. Preserve the repo's existing layout and make dependencies point toward business behavior. Keep the guidance practical: where code belongs, how dependencies flow, and which architectural shortcuts to catch.
 
-## Architecture Rule
+## Dependency Direction
 
-Dependencies point inward:
+Use this dependency direction:
 
 ```text
-ports/transports -> app/use cases -> domain
-adapters/infrastructure -> app/use cases -> domain
-service/cmd composition wires everything
+ports/transports -> application/use cases -> domain
+adapters/infrastructure -> application/use cases -> domain
+service/cmd composition wires concrete implementations
 ```
 
-The domain must not know about HTTP, gRPC, SQL, queues, config, logging libraries, telemetry vendors, filesystem/process execution, or process lifecycle. The application layer can orchestrate those capabilities only through narrow interfaces.
+Use these layer responsibilities:
 
-## Decision Workflow
+- **Domain**: business rules and domain types.
+- **Application**: commands, queries, and use-case orchestration.
+- **Ports**: HTTP, gRPC, CLI, queue, and message entry points.
+- **Adapters**: database, external-service, Pub/Sub, filesystem, and infrastructure implementations.
 
-1. Inspect the current package layout before adding a pattern.
+Domain packages stay focused on business rules. Application packages orchestrate IO through narrow interfaces. Composition code wires concrete implementations.
+
+## Workflow Placement
+
+1. Inspect the current package layout.
 2. Identify the workflow: command, query, background job, integration event, direct port, or migration.
 3. Put transport parsing and response mapping at the edge.
 4. Put orchestration in an application service, command handler, query handler, or use case.
 5. Put business decisions in domain types.
-6. Put SQL, external APIs, queues, clocks, random IDs, file systems, and process execution behind narrow interfaces owned by the package that consumes them.
+6. Put SQL, external APIs, queues, clocks, random IDs, file systems, and process execution behind narrow interfaces.
 7. Wire concrete dependencies in `main`, `cmd`, `service`, or the repo's established composition package.
-8. Add or update component tests for new wiring.
+8. Cover new wiring with component tests when behavior crosses package boundaries.
 
-## Practical Package Layout
+## Package Layout
 
-Small services can stay simple:
+Small services can keep one cohesive package per domain area:
 
 ```text
 cmd/api/main.go
@@ -44,7 +51,7 @@ internal/orders/
   postgres.go
 ```
 
-Split adapters when one package now contains multiple transports, multiple infrastructure adapters, or import rules the repo enforces mechanically:
+Split packages when responsibilities are already distinct:
 
 ```text
 internal/orders/
@@ -55,55 +62,68 @@ internal/orders/
   service/
 ```
 
-Avoid copying a large template into a small service. Add folders when the current package now has mixed responsibilities or the repo already uses that boundary.
+Add folders when they clarify ownership, import direction, or adapter boundaries.
 
-## Application Services
+## Application Handlers
 
-Application services coordinate IO, authorization, transaction scope, idempotency, logging/tracing boundaries, and domain calls. Keep each handler focused on one workflow:
+Use one command/query handler per workflow when dependencies or read/write models differ:
 
 ```go
-type PlaceOrderHandler struct {
-    orders OrderRepository
-    tx     Transactor
-    clock  Clock
+type CancelTrainingHandler struct {
+    repo           trainingRepository
+    userService    userService
+    trainerService trainerService
 }
 
-func (h PlaceOrderHandler) Handle(ctx context.Context, cmd PlaceOrder) error {
-    return h.tx.WithinTx(ctx, func(ctx context.Context) error {
-        order, err := NewOrder(cmd.CustomerID, cmd.Lines, h.clock.Now())
-        if err != nil {
+func (h CancelTrainingHandler) Handle(ctx context.Context, cmd CancelTraining) error {
+    return h.repo.CancelTraining(ctx, cmd.TrainingUUID, func(ctx context.Context, tr *Training) error {
+        if err := tr.Cancel(); err != nil {
             return err
         }
-        return h.orders.Save(ctx, order)
+        if err := h.trainerService.CancelTraining(ctx, tr.Time); err != nil {
+            return fmt.Errorf("cancel trainer schedule: %w", err)
+        }
+        return nil
     })
 }
 ```
 
-Do not let application services become generic "manager" objects. Keep one method or handler per use case when workflows differ. Split commands and queries when read and write paths have different dependencies or models.
+Use a cohesive multi-method application service when the methods share one clear application concept and the repo already follows that style. Split toward command/query handlers when read and write paths have different dependencies, models, or authorization rules.
+
+Bundle CQRS handlers behind an application struct:
+
+```go
+type Application struct {
+    Commands Commands
+    Queries  Queries
+}
+
+type Commands struct {
+    CancelTraining CancelTrainingHandler
+}
+
+type Queries struct {
+    AvailableHours AvailableHoursHandler
+}
+```
+
+Use decorators for cross-cutting behavior such as command logging, metrics, authorization, and retries. A command logging decorator should record the start, defer final logging, and include the returned error/result after the inner handler finishes.
 
 ## Interfaces
 
-Define interfaces where they are consumed, not where implementations live. Put repository interfaces with the aggregate/domain when they express aggregate persistence. Put external service ports in the app package that orchestrates them.
-
-Good:
+Define interfaces where they are consumed:
 
 ```go
-type OrderRepository interface {
-    Get(ctx context.Context, id OrderID) (*Order, error)
-    Save(ctx context.Context, order *Order) error
+type trainingRepository interface {
+    CancelTraining(ctx context.Context, trainingUUID string, updateFn func(context.Context, *Training) error) error
+}
+
+type trainerService interface {
+    CancelTraining(ctx context.Context, trainingTime time.Time) error
 }
 ```
 
-Avoid broad ports:
-
-```go
-type Database interface {
-    Query(ctx context.Context, sql string, args ...any) (*Rows, error)
-    Exec(ctx context.Context, sql string, args ...any) error
-}
-```
-
-The interface should describe the use case need, not the mechanics of a dependency. Split interfaces that mix unrelated workflows.
+Interfaces should describe the use-case need. Keep them narrow enough to fake in tests and broad enough to avoid leaking implementation mechanics.
 
 ## Transport Layer
 
@@ -113,39 +133,46 @@ Handlers should:
 - Convert request data into command/query types.
 - Call one application use case.
 - Map known errors to protocol responses.
-- Keep framework types (`gin.Context`, `echo.Context`, generated request objects) at the edge.
+- Keep framework types at the edge.
 
-Handlers should not:
-
-- Open transactions.
-- Build SQL queries.
-- Mutate aggregates directly when an application service exists.
-- Publish domain events directly when the app layer owns the workflow.
-- Depend on concrete database clients unless the service is intentionally tiny.
+Handlers should not open transactions, build SQL queries, mutate aggregates directly when an application use case exists, publish workflow events directly when the app layer owns the command, or depend on concrete database clients unless the service is intentionally tiny.
 
 ## Cross-Context Calls
 
-Prefer one of these:
+Use one of these integration styles:
 
 - **Direct port** for synchronous in-process access with a stable request/response contract.
 - **Domain/application event** for asynchronous reactions.
-- **Shared kernel/common package** only for stable cross-cutting primitives, not business shortcuts.
+- **Shared kernel/common package** for stable cross-cutting primitives.
+- **Anti-corruption adapter** when another context's model should not leak into this context.
 
-Avoid importing another bounded context's domain package directly unless the repo explicitly allows it.
+Avoid importing another context's domain package directly unless the repo explicitly accepts that coupling.
+
+For deeper boundary decisions, use `go-strategic-ddd` before changing packages or service splits. This skill decides where code lives once the boundary is known.
 
 ## Dependency Injection
 
-Prefer explicit constructors and struct fields. Use code generation or DI frameworks only if the project already uses them.
+Prefer explicit constructors and struct fields:
 
 ```go
-func NewServer(log *slog.Logger, orders PlaceOrderHandler) *http.Server {
+func NewServer(log *logrus.Entry, orders PlaceOrderHandler) *http.Server {
     mux := http.NewServeMux()
     registerOrderRoutes(mux, log, orders)
     return &http.Server{Handler: mux}
 }
 ```
 
-Keep wiring centralized so business packages do not import infrastructure packages just to construct themselves. Composition code can be large in real systems; keep it grouped by context and covered by component tests.
+Keep wiring centralized so business packages stay independent from concrete infrastructure packages.
+
+## Anti-Patterns
+
+- Domain packages importing HTTP, gRPC, SQL, queues, config, logging libraries, telemetry vendors, filesystem/process APIs, or service lifecycle code.
+- Application packages importing concrete adapters when composition should inject narrow ports.
+- Broad interfaces named after mechanics, such as database-shaped ports, instead of use-case needs.
+- Generic manager/service objects with unrelated methods and unclear workflow names.
+- Route handlers or message handlers that perform orchestration, transactions, SQL, and domain mutation inline.
+- Copying a large clean-architecture template into a small service before responsibilities need those packages.
+- Cross-context domain imports used as shortcuts around a direct port or event contract.
 
 ## Boundary Checks
 
@@ -153,12 +180,17 @@ Keep wiring centralized so business packages do not import infrastructure packag
 - Search ports for repository/database imports.
 - Search domain for framework, SQL, broker, cloud, process, and telemetry imports.
 - Search app for concrete adapter imports unless the repo intentionally wires there.
-- Check whether commands and queries are named entry points, not anonymous service methods.
+- Check whether commands and queries are named entry points.
 - Check whether component tests cover new wiring.
+
+## Examples
+
+- [`examples/command_handler.go`](examples/command_handler.go) - `CancelTrainingHandler` with narrow local interfaces and an UpdateFn-style repository call.
+- [`examples/query_handler.go`](examples/query_handler.go) - `AvailableHoursHandler` reading through `AvailableHoursReadModel` and returning flat read DTOs.
 
 ## Done Criteria
 
 - A request path has one visible route from handler to use case to domain to adapter.
 - Package imports show inward dependency direction.
 - Infrastructure can be swapped or faked without editing domain code.
-- Names describe workflows and domain concepts, not generic layers.
+- Names describe workflows and domain concepts.

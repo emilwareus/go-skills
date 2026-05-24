@@ -1,162 +1,82 @@
 ---
 name: go-errors-observability
-description: Design Go error handling and observability with wrapped errors, sentinel/domain errors, typed error contracts, error classification, structured slog logging, metrics, tracing, context propagation, and HTTP/gRPC/message error mapping. Use for Go tasks involving custom error packages, slog/zap/logrus migration, OpenTelemetry, retries, incident debugging, Watermill handler failures, or making failures diagnosable without leaking internals.
+description: Design Go error handling with wrapped errors, sentinel and typed error contracts, stable slug errors, boundary classification, and HTTP error mapping. Use for Go tasks involving public API errors, wrapping with %w, errors.Is/errors.As, or avoiding duplicate logs.
 ---
 
 # Go Errors And Observability
 
-Use this when a Go change touches error contracts, logging, metrics, tracing, retries, or protocol error mapping. Read local error and observability docs first.
+Use this when a change touches error contracts, wrapping, logging boundaries, or protocol error mapping. Preserve error classification through the stack and translate errors once at the boundary. Keep the implementation small: wrapped errors, sentinel or typed contracts, slug responses, and one logging boundary.
 
-## Error Principles
+## Error Contracts
 
-- Return errors; do not log and return the same error at every layer.
-- Wrap errors with operation context using `%w`.
-- Classify errors at boundaries, not deep inside infrastructure.
-- Keep domain errors comparable with `errors.Is` or classifiable with `errors.As` when callers branch on them.
-- Preserve typed errors. Do not wrap them in a way that destroys classification.
-- Do not expose database, provider, stack, or secret internals in public API responses.
-
-## Error Shape
-
-Use sentinel errors for stable categories:
+Use stable sentinels when callers need category checks:
 
 ```go
-var ErrOrderNotFound = errors.New("order not found")
+var ErrTrainingNotFound = errors.New("training not found")
 ```
 
-Wrap with context at the point of failure:
+Use typed slug errors when public responses need stable machine-readable identifiers:
 
 ```go
-order, err := r.loadOrder(ctx, id)
+return NewIncorrectInputError("date-from-after-date-to", "Date from after date to")
+```
+
+Public response slugs are API surface. Keep them stable and documented by tests. Use the human message for client-facing or diagnostic text, not for classification.
+
+## Wrapping
+
+Wrap where new operation context is added:
+
+```go
+training, err := r.loadTraining(ctx, id)
 if err != nil {
-    return nil, fmt.Errorf("load order %s: %w", id, err)
+    return nil, fmt.Errorf("load training %s: %w", id, err)
 }
 ```
 
-Use typed errors when callers need structured data:
+Boundary code should still classify wrapped errors with `errors.Is` and `errors.As`.
+
+## HTTP Mapping
+
+Centralize HTTP error mapping:
 
 ```go
-type ValidationError struct {
-    Field string
-    Rule  string
-}
-
-func (e ValidationError) Error() string {
-    return e.Field + " is invalid"
-}
-```
-
-If the repo has a typed error package, use it for domain/application contracts and stable slugs/codes. Use raw `fmt.Errorf` for private implementation context that will be translated before crossing a boundary.
-
-## Layer Responsibilities
-
-Infrastructure:
-
-- Wrap driver/provider failures with operation context.
-- Convert dependency outcomes into domain/application errors when callers must branch on them.
-- Preserve original errors with `%w`.
-- Add provider/status/operation context without leaking secrets.
-
-Application:
-
-- Add workflow context.
-- Decide retry, compensation, idempotency, and transaction behavior.
-- Do not log expected domain errors unless the product needs an audit trail.
-- Publish or return domain/application events/errors without transport concerns.
-
-Transport:
-
-- Map errors to HTTP/gRPC/message responses.
-- Log unexpected failures once with request/message metadata.
-- Return client messages that are stable and do not expose internals.
-- Translate validation, auth, not found, conflict, timeout, canceled, and unexpected errors consistently.
-
-## HTTP And gRPC Mapping
-
-Centralize mapping from internal errors to protocol responses:
-
-```go
-func statusFor(err error) int {
-    switch {
-    case errors.Is(err, ErrOrderNotFound):
-        return http.StatusNotFound
-    case errors.As(err, new(ValidationError)):
-        return http.StatusBadRequest
-    default:
-        return http.StatusInternalServerError
+func RespondWithSlugError(err error, w http.ResponseWriter, r *http.Request) {
+    var slugErr SlugError
+    if errors.As(err, &slugErr) {
+        writeSlugResponse(slugErr, w, r)
+        return
     }
+    InternalError("internal-server-error", err, w, r)
 }
 ```
 
-Do not scatter status-code decisions across handlers. Keep gRPC status mapping similarly centralized.
+Map expected input and authorization errors to stable client responses. Map unexpected failures to an internal slug and log the wrapped error with request metadata.
 
 ## Logging
 
-Use structured logs. Include stable identifiers, not whole objects:
+Log unexpected failures once at the transport or worker boundary. Include stable identifiers such as request ID, route, message ID, aggregate ID, and slug. Keep secrets, raw payloads, tokens, and provider internals out of public responses and logs.
 
-```go
-logger.ErrorContext(ctx, "place order failed",
-    "order_id", orderID,
-    "customer_id", customerID,
-    "error", err,
-)
-```
+Expected user-input and authorization outcomes can return slug errors without error-level logs unless the product needs an audit trail.
 
-Log at these boundaries:
+## Anti-Patterns
 
-- Unexpected application errors at the transport or worker boundary.
-- External dependency failures where latency, provider, or status code matters.
-- Background job and message handler start/finish/failure.
-- Security/audit events required by the product.
+- String-matching `err.Error()` in handlers or workers.
+- Returning raw database, provider, stack, token, or secret-bearing error strings in public responses.
+- Logging the same returned error in every repository, handler, adapter, and transport frame.
+- Wrapping with `%v` or rebuilding errors in a way that breaks `errors.Is` and `errors.As`.
+- Creating new public slugs casually; slug changes are API changes.
+- Turning every error into a typed public error when only one internal caller needs a category.
+- Swallowing unexpected errors at the boundary without logging enough request or message context.
 
-Avoid:
+## Examples
 
-- Logging secrets, tokens, raw payloads with personal data, or full SQL with arguments.
-- Logging the same error repeatedly through every stack frame.
-- Using logs as the only source for business metrics.
-- Logging with the legacy `log` package in application code when the repo standard is `slog`.
-
-Use context-aware logging when a request, job, message, or trace context is available.
-
-## Metrics
-
-Use metrics for aggregate behavior:
-
-- Request count, latency, and error count by route/status.
-- External dependency latency and failure count by provider/operation.
-- Job duration, success/failure count, and queue lag.
-- Domain counters for business events that product or operations staff track.
-
-Keep label cardinality bounded. Do not use user IDs, order IDs, email addresses, message UUIDs, or raw error strings as labels.
-
-## Tracing
-
-Propagate `context.Context` through every IO boundary. Use context-aware database, HTTP, broker, and logger calls.
-
-Create spans around:
-
-- Incoming requests and worker jobs.
-- Database operations when not already instrumented.
-- External API calls.
-- Queue publish/consume.
-- Long-running use case steps.
-
-Attach bounded-cardinality attributes. Keep tracing in app, adapter, and port boundaries, not pure domain code.
-
-## Event-Driven Failures
-
-For message handlers:
-
-- Handler success should Ack; handler error should Nack or trigger retry according to the broker/router.
-- Retry transient failures with bounded policy.
-- Make handlers idempotent because duplicate delivery is normal.
-- Log final failure with message UUID, event type, correlation ID, and aggregate ID.
-- Send poison or permanently invalid messages to a dead-letter path when the infrastructure supports it.
+- [`examples/error_types.go`](examples/error_types.go) - slug-error type, constructors, sentinel error, and `%w` wrapping.
+- [`examples/http_mapping.go`](examples/http_mapping.go) - `InternalError`, `Unauthorised`, `BadRequest`, and `RespondWithSlugError` helpers.
 
 ## Done Criteria
 
-- Callers can distinguish not-found, validation, conflict, permission, timeout, canceled, and unexpected errors.
+- Public responses use stable slugs.
+- Wrapped errors preserve `errors.Is` and `errors.As` classification.
+- Error-to-protocol mapping is centralized at the boundary.
 - Unexpected errors are logged once with enough context to debug.
-- Metrics answer "how often" and "how slow" without high-cardinality labels.
-- Traces connect request, use case, database, broker, and external calls through `context.Context`.
-- Public responses and message retry decisions are based on typed/classified errors, not string matching.
